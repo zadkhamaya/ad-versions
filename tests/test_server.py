@@ -1240,3 +1240,42 @@ def test_reframe_refusals(rf):
     assert c.post("/reframe", json=_reframe_body(formats=[])).status_code == 422
     r = c.post("/reframe", json=_reframe_body(beats=[{"name": "S9", "start": 1, "end": 9}]))
     assert r.status_code == 422 and "S9" in r.json()["detail"]
+
+
+# ---- the stand-in voice for dry runs ----
+
+def test_stub_voice_renders_without_any_voice_env(env, monkeypatch):
+    _stub_pipeline(env, monkeypatch)
+    for n in ("VOICE_SAMPLE_KEY", "VOICE_SAMPLE_TRANSCRIPT", "VOICE_EN_ENDPOINT", "RUNPOD_API_KEY", "R2_BUCKET"):
+        monkeypatch.delenv(n, raising=False)
+    monkeypatch.setattr(voice, "r2_from_env", lambda: (_ for _ in ()).throw(AssertionError("stub must not touch R2")))
+    r = env["client"].post("/render", json=body("H1_6S_1X1", voice="stub"))
+    assert r.status_code == 200, r.text
+    assert env["speak"] == []                                # no RunPod job
+    assert r.json()["log"]["voice"] == "stub" and r.json()["log"]["vo_s"] > 0.5
+    (wav,) = (env["run"] / "vo").glob("*.wav")
+    assert 47000 <= int(ff_probe_rate(wav)) <= 48000
+
+
+def ff_probe_rate(path):
+    import subprocess
+    return subprocess.run(["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=sample_rate", "-of", "csv=p=0",
+                           str(path)], capture_output=True, text=True).stdout.strip()
+
+
+def test_the_default_voice_is_runpod_and_an_unknown_one_is_422(env, monkeypatch):
+    _stub_pipeline(env, monkeypatch)
+    c = env["client"]
+    assert c.post("/render", json=body("H1_6S_1X1", voice="runpod")).status_code == 200
+    assert len(env["speak"]) == 1
+    assert c.post("/render", json=body("H1_6S_1X1", voice="robot")).status_code == 422
+
+
+def test_the_voice_cache_separates_modes(env, monkeypatch):
+    _stub_pipeline(env, monkeypatch)
+    c = env["client"]
+    assert c.post("/render", json=body("H1_6S_1X1")).status_code == 200                       # runpod
+    assert c.post("/render", json=body("H1_6S_16X9", voice="stub")).status_code == 200          # same text, other mode: new voice
+    assert len(env["speak"]) == 1 and len(list((env["run"] / "vo").glob("*.wav"))) == 2
+    r = c.post("/render", json=body("H2_6S_1X1", voice="stub"))                                 # same mode again: cached
+    assert r.json()["log"]["vo_cached"] is True and len(list((env["run"] / "vo").glob("*.wav"))) == 2

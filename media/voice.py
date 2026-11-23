@@ -163,6 +163,21 @@ def _duration(path):
         raise VoiceError("the voice-over file is not audio") from None
 
 
+def stub_speak(text, out_wav, *, voice="slt") -> float:
+    """The dry-run voice: ffmpeg's flite filter reads `text` (48 kHz mono WAV). No RunPod, no R2. Whisper hears it word for word."""
+    out_wav = Path(out_wav)
+    txt = out_wav.with_suffix(".txt")
+    txt.write_text(text, encoding="utf-8")
+    try:
+        r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"flite=textfile={txt}:voice={voice}",
+                            "-ar", "48000", "-ac", "1", str(out_wav)], capture_output=True, text=True)
+    finally:
+        txt.unlink(missing_ok=True)
+    if r.returncode != 0:
+        raise VoiceError("the stand-in voice failed (ffmpeg flite): " + r.stderr.strip()[-200:])
+    return _duration(out_wav)
+
+
 def speak(text, out_wav, *, sample_get, transcript, run, version, runpod=None, r2=None, endpoint=None,
           poll_s=2.0, max_total_s=JOB_TTL_S, clock=time.monotonic, sleep=time.sleep, info=None) -> float:
     """Voice `text` in the sample's voice, write the WAV to out_wav, return its length in seconds. If `info` is a dict, the

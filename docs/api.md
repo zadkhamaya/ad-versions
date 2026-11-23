@@ -45,7 +45,9 @@ Renders one version and writes `renders/<version>.mp4` (a failed or refused rend
 Fields: `run_id`, `version`, `source` (the clip), `beats` (`name` S1 to S6, `start`, `end` in seconds, `role`, `face`, `x`:
 see "Crop position" below), `broll` (`{"slot1": {"wide": path, "tall": path}}`; a missing slot drops that cutaway),
 `vo_text` (the approved voice-over script, also what the captions show), `disclaimer` (burned into the end card), `music`,
-optional `logo` and `brand`.
+optional `logo` and `brand`, and optional `voice`: `"runpod"` (default, the RunPod voice job) or `"stub"` (a stand-in for dry
+runs: ffmpeg's `flite` filter reads the script, 48 kHz mono; needs no RunPod or R2 environment; Whisper hears it word for word).
+The voice cache key includes the mode, so a stub voice is never reused for a real run (or the other way round).
 
 ```json
 {"run_id": "r1", "version": "H1_15S_9X16", "source": "runs/r1/source.mp4",
@@ -63,7 +65,7 @@ Answer: `{"file": "runs/r1/renders/H1_15S_9X16.mp4", "log": {...}}`. The log:
   `crop review in S4 (9X16)` (an auto beat whose window holds under 90 % of the movement and faces: look at it).
 - `reframe` (only when a beat had `face: "auto"` and its crop window can move): `{"S4": {"9X16": {"x", "coverage", "faces", "split", "span"}}}`,
   the suggestion that was used for each such beat and format (fields as in `POST /reframe`).
-- `vo_s`, `vo_cached` (true when the voice came from this run's cache), `vo_execution_ms` (the voice job's GPU time, only
+- `voice` (`runpod` or `stub`), `vo_s`, `vo_cached` (true when the voice came from this run's cache), `vo_execution_ms` (the voice job's GPU time, only
   when a job ran and RunPod reported it), `caption_wer` (script against what Whisper heard).
 - `segments`, `broll_match` (colour distance before and after the grade), `endcard`, `finish` (loudness measured,
   limiter, room tone: `mixed` or `skipped: ...`, the ffmpeg commands).

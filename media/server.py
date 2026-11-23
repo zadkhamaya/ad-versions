@@ -160,6 +160,7 @@ class RenderIn(BaseModel):
     music: str
     logo: Optional[str] = None            # a PNG; absent: the brand name is drawn as text
     brand: Optional[str] = Field(default=None, min_length=1, max_length=40)
+    voice: Literal["runpod", "stub"] = "runpod"    # "stub": ffmpeg's flite reads the script (dry runs); no RunPod or R2 needed
 
     @field_validator("version")
     @classmethod
@@ -393,15 +394,23 @@ def _voice(req: RenderIn, run_dir: Path, work: Path, log: dict) -> Path:
     One lock per script, so two renders asking at once make one voice job; a failed job caches nothing.
     The log gets `vo_cached` and, for a job that ran, `vo_execution_ms` (RunPod's executionTime, to cost the voice)."""
     # the key covers everything that makes the audio: the script, the voice sample and what it says, the model and its params
-    key = json.dumps([req.vo_text, os.environ.get("VOICE_SAMPLE_KEY"), os.environ.get("VOICE_SAMPLE_TRANSCRIPT"), voice.MODEL,
-                      voice.PARAMS, os.environ.get("VOICE_EN_ENDPOINT")], sort_keys=True)
+    stub = req.voice == "stub"
+    key = json.dumps([req.vo_text, "stub" if stub else "runpod", None if stub else os.environ.get("VOICE_SAMPLE_KEY"),
+                      None if stub else os.environ.get("VOICE_SAMPLE_TRANSCRIPT"), voice.MODEL, voice.PARAMS,
+                      None if stub else os.environ.get("VOICE_EN_ENDPOINT")], sort_keys=True)
     sha = hashlib.sha256(key.encode("utf-8")).hexdigest()[:12]
     cached = run_dir / "vo" / f"{sha}.wav"
     with _vo_guard:
         lock = _vo_locks.setdefault((req.run_id, sha), threading.Lock())
     with lock:
         log["vo_cached"] = cached.exists()
-        if not log["vo_cached"]:
+        log["voice"] = req.voice
+        if not log["vo_cached"] and stub:
+            tmp = work / "vo.wav"
+            voice.stub_speak(req.vo_text, tmp)
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            os.replace(tmp, cached)
+        elif not log["vo_cached"]:
             sample_key, transcript = os.environ.get("VOICE_SAMPLE_KEY"), os.environ.get("VOICE_SAMPLE_TRANSCRIPT")
             if not sample_key or not transcript:
                 raise RuntimeError("missing environment: " + ", ".join(
