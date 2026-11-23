@@ -1,0 +1,1709 @@
+{
+ "name": "ad-versions",
+ "nodes": [
+  {
+   "id": "00000001-0000-4000-8000-000000000000",
+   "name": "Brief form",
+   "webhookId": "ad-versions-brief",
+   "type": "n8n-nodes-base.formTrigger",
+   "typeVersion": 2.2,
+   "position": [
+    0,
+    0
+   ],
+   "parameters": {
+    "authentication": "basicAuth",
+    "formTitle": "Ad versions: brief",
+    "formDescription": "One clip in, up to 18 ad versions out. Beats, one per line: <code>NAME START-END ROLE [POSITION]</code>, e.g. <code>S4 15.5-21.5 opener-H2 x9=0.21,x1=0.30</code>. POSITION: left, centre, right, auto, a number 0 to 1, and/or x9=, x1= (9:16 and 1:1 window centres). Leave a position out for centre. All of S1 to S6 are needed.",
+    "formFields": {
+     "values": [
+      {
+       "fieldLabel": "Brand",
+       "fieldType": "text",
+       "requiredField": true,
+       "placeholder": "The fictional brand's name"
+      },
+      {
+       "fieldLabel": "Product",
+       "fieldType": "text",
+       "requiredField": true
+      },
+      {
+       "fieldLabel": "Audience",
+       "fieldType": "text",
+       "requiredField": false
+      },
+      {
+       "fieldLabel": "Offer",
+       "fieldType": "text",
+       "requiredField": true
+      },
+      {
+       "fieldLabel": "Key message 1",
+       "fieldType": "text",
+       "requiredField": true
+      },
+      {
+       "fieldLabel": "Key message 2",
+       "fieldType": "text",
+       "requiredField": true
+      },
+      {
+       "fieldLabel": "Key message 3",
+       "fieldType": "text",
+       "requiredField": true
+      },
+      {
+       "fieldLabel": "Required disclaimer",
+       "fieldType": "text",
+       "requiredField": true,
+       "defaultValue": "A clinician assesses every request. Care plans differ from person to person."
+      },
+      {
+       "fieldLabel": "Source clip",
+       "fieldType": "file",
+       "acceptFileTypes": ".mp4,.mov",
+       "multipleFiles": false,
+       "requiredField": false
+      },
+      {
+       "fieldLabel": "Source clip link",
+       "fieldType": "text",
+       "requiredField": false,
+       "placeholder": "https://... (for a clip over 90 MB; used instead of the file)"
+      },
+      {
+       "fieldLabel": "Beats",
+       "fieldType": "textarea",
+       "requiredField": true,
+       "placeholder": "S1 0.5-6.0 opener-H1 centre\nS2 6.6-9.3 tension\nS3 9.6-15.0 routine auto\nS4 15.5-21.5 opener-H2 x9=0.21,x1=0.30\nS5 21.9-26.8 calm x9=0.35\nS6 27.5-31.5 close x9=0.37,x1=0.42"
+      },
+      {
+       "fieldLabel": "Look",
+       "fieldType": "text",
+       "requiredField": false,
+       "placeholder": "optional: one line that replaces the look line written from the clip"
+      },
+      {
+       "fieldLabel": "Dry run",
+       "fieldType": "checkbox",
+       "requiredField": false,
+       "defaultValue": "Dry run: stand-in b-roll, no GPU",
+       "fieldOptions": {
+        "values": [
+         {
+          "option": "Dry run: stand-in b-roll, no GPU"
+         }
+        ]
+       }
+      }
+     ]
+    },
+    "options": {
+     "path": "brief",
+     "buttonLabel": "Start the run"
+    }
+   },
+   "credentials": {
+    "httpBasicAuth": {
+     "name": "brief-form"
+    }
+   }
+  },
+  {
+   "id": "00000002-0000-4000-8000-000000000000",
+   "name": "Run: ids and brief",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    230,
+    0
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// Brief form answers -> the run: id, brief fields, dry-run switch, link or upload.\nconst item = $input.first();\nconst f = item.json;\nconst run_id = String($execution.id);\nif (!/^[A-Za-z0-9_-]{1,64}$/.test(run_id)) throw new Error('execution id ' + run_id + ' is not a valid run id');\nconst txt = (k) => String(f[k] == null ? '' : f[k]).trim();\nconst brief = {\n  brand: txt('Brand'), product: txt('Product'), audience: txt('Audience'), offer: txt('Offer'),\n  key_messages: [txt('Key message 1'), txt('Key message 2'), txt('Key message 3')].filter(Boolean),\n  disclaimer: txt('Required disclaimer'), look: txt('Look'), beats: String(f['Beats'] == null ? '' : f['Beats']),\n};\nfor (const k of ['brand', 'product', 'offer']) if (!brief[k]) throw new Error('the brief needs a ' + k);\nif (brief.key_messages.length < 3) throw new Error('the brief needs 3 key messages');\nif (!brief.beats.trim()) throw new Error('the brief needs beats');\nconst link = txt('Source clip link');\nif (link && !/^https:\\/\\/\\S+$/i.test(link)) throw new Error('Source clip link must be an https:// address (no spaces)');\nconst bin = item.binary || {};\nconst key = Object.keys(bin)[0];\nif (!link && !key) throw new Error('give a source clip: upload a file or paste an https link');\n// the dry-run checkbox arrives as a JSON array: [] (unticked) means a live run; a missing field means dry (safe default)\nconst dr = f['Dry run'];\nconst dry_run = Array.isArray(dr) ? dr.length > 0 : true;\nreturn [{ json: { run_id, brief, dry_run, link, source_origin: link ? 'link' : 'upload' }, binary: link ? {} : { data: bin[key] } }];\n"
+   }
+  },
+  {
+   "id": "00000003-0000-4000-8000-000000000000",
+   "name": "Run: folder (POST /run)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    460,
+    0
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://media:8000/run",
+    "options": {
+     "timeout": 300000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ { run_id: String($execution.id) } }}"
+   }
+  },
+  {
+   "id": "00000004-0000-4000-8000-000000000000",
+   "name": "Run: restore",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    690,
+    0
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// /run answered with just the folder name: put the run and the uploaded file back.\nconst prev = $('Run: ids and brief').first();\nreturn [{ json: prev.json, binary: prev.binary }];\n"
+   }
+  },
+  {
+   "id": "00000005-0000-4000-8000-000000000000",
+   "name": "Source: link given?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    920,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.link }}",
+       "rightValue": "",
+       "operator": {
+        "type": "string",
+        "operation": "notEmpty",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000006-0000-4000-8000-000000000000",
+   "name": "Source: download (https)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1150,
+    -102
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "={{ $json.link }}",
+    "options": {
+     "timeout": 1800000,
+     "response": {
+      "response": {
+       "responseFormat": "file",
+       "outputPropertyName": "data"
+      }
+     }
+    }
+   }
+  },
+  {
+   "id": "00000007-0000-4000-8000-000000000000",
+   "name": "Source: write source.mp4",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    1380,
+    0
+   ],
+   "parameters": {
+    "operation": "write",
+    "fileName": "=/data/runs/{{ $execution.id }}/source.mp4",
+    "dataPropertyName": "data",
+    "options": {}
+   }
+  },
+  {
+   "id": "00000008-0000-4000-8000-000000000000",
+   "name": "Source: ready",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1610,
+    0
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const S = $('Run: restore').first().json;\nreturn [{ json: { ...S, source: 'runs/' + S.run_id + '/source.mp4' } }];\n"
+   }
+  },
+  {
+   "id": "00000009-0000-4000-8000-000000000000",
+   "name": "Beats: parse",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    0,
+    340
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// One beat per line:  NAME START-END ROLE [POSITION ...]   (blank lines and # comments are ignored)\n//   NAME      S1 .. S6, each once\n//   START-END seconds in the source clip, e.g. 0.5-6.0\n//   ROLE      a free label: opener-H1, tension, routine, opener-H2, calm, close\n//   POSITION  where the 9:16 / 1:1 crop window sits, any of these (default: centre):\n//             left | centre | right | auto | a number 0..1 (window centre as a share of the width)   -> the service's `face`\n//             x9=0.21 and/or x1=0.30, comma-joined or separate (9:16 and 1:1 centres)              -> the service's `x`\nconst S = $input.first().json;\nconst FACES = { left: 'left', centre: 'centre', center: 'centre', right: 'right', auto: 'auto' };\nconst NAMES = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6'];\nconst text = S.brief.beats.replace(/(\\d)\\s*[-–—]\\s*(\\d)/g, '$1-$2');\nconst lines = text.split(/\\r?\\n/).map((l) => l.replace(/#.*$/, '').trim()).filter(Boolean);\nconst beats = [];\nconst errs = [];\nlines.forEach((line, i) => {\n  const where = 'beats line ' + (i + 1) + ' (\"' + line + '\")';\n  const t = line.split(/\\s+/);\n  if (t.length < 3) { errs.push(where + ': needs NAME START-END ROLE'); return; }\n  const name = t[0].toUpperCase();\n  if (!NAMES.includes(name)) errs.push(where + ': the name must be one of ' + NAMES.join(', '));\n  const m = t[1].match(/^(\\d+(?:\\.\\d+)?)-(\\d+(?:\\.\\d+)?)$/);\n  if (!m) { errs.push(where + ': the times must look like 0.5-6.0'); return; }\n  const start = Number(m[1]); const end = Number(m[2]);\n  if (!(end > start)) errs.push(where + ': the end must be after the start');\n  const beat = { name, start, end, role: t[2] };\n  let face = 'centre'; const x = {};\n  for (const tok of t.slice(3)) {\n    const lower = tok.toLowerCase();\n    if (FACES[lower]) { face = FACES[lower]; continue; }\n    if (/^(0(\\.\\d+)?|1(\\.0+)?|\\.\\d+)$/.test(lower)) { face = Number(lower); continue; }\n    let ok = true;\n    for (const part of lower.split(',').filter(Boolean)) {\n      const p = part.match(/^(x9|x1|9x16|1x1)=(0(?:\\.\\d+)?|1(?:\\.0+)?|\\.\\d+)$/);\n      if (!p) { ok = false; break; }\n      x[p[1] === 'x9' || p[1] === '9x16' ? '9X16' : '1X1'] = Number(p[2]);\n    }\n    if (!ok) errs.push(where + ': \"' + tok + '\" is not a position (left, centre, right, auto, 0..1, x9=0.2, x1=0.4)');\n  }\n  beat.face = face;\n  if (Object.keys(x).length) beat.x = x;\n  beats.push(beat);\n});\nconst seen = beats.map((b) => b.name);\nfor (const n of NAMES) if (seen.filter((s) => s === n).length !== 1) errs.push('beat ' + n + ' must appear exactly once (all of S1 to S6 are needed)');\nif (errs.length) throw new Error('beats: ' + errs.join('; '));\nbeats.sort((a, b) => a.name.localeCompare(b.name));\nconst body = { run_id: S.run_id, source: S.source, beats, formats: ['9X16', '1X1'] };\nreturn [{ json: { ...S, beats, body } }];\n"
+   }
+  },
+  {
+   "id": "00000010-0000-4000-8000-000000000000",
+   "name": "Beats: validate (POST /reframe)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    230,
+    340
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://media:8000/reframe",
+    "options": {
+     "timeout": 600000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}"
+   }
+  },
+  {
+   "id": "00000011-0000-4000-8000-000000000000",
+   "name": "Reframe: keep",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    460,
+    340
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const S = $('Beats: parse').first().json;\nconst r = $input.first().json;\nconst flags = [];\nfor (const [beat, fm] of Object.entries(r.beats || {})) for (const [fmt, s] of Object.entries(fm)) {\n  if (s.split) flags.push(beat + ' ' + fmt + ' split');\n  if (s.review) flags.push(beat + ' ' + fmt + ' review');\n}\nconst { body, ...rest } = S;\nreturn [{ json: { ...rest, reframe: { beats: r.beats, sheet: r.sheet, flags } } }];\n"
+   }
+  },
+  {
+   "id": "00000012-0000-4000-8000-000000000000",
+   "name": "Rulebook: get",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    690,
+    340
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "http://media:8000/rulebook",
+    "options": {
+     "timeout": 300000
+    }
+   }
+  },
+  {
+   "id": "00000013-0000-4000-8000-000000000000",
+   "name": "Scripts: prompt",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    920,
+    340
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\n// Script prompt: the brief + the rulebook -> 2 hooks, a voice-over line per length, 3 b-roll shots per hook.\nconst S = $('Reframe: keep').first().json;\nconst rb = $input.first().json;\nconst b = S.brief;\nconst beatList = S.beats.map((x) => x.name + ' (' + x.role + ')').join(', ');\nconst system = [\n  'You write voice-over scripts and b-roll shot lists for short paid-social video ads for a fictional sleep telehealth brand.',\n  'Return only the JSON object asked for. No commentary.',\n].join(' ');\nconst user = [\n  'BRIEF',\n  'Brand: ' + b.brand,\n  'Product: ' + b.product,\n  'Audience: ' + b.audience,\n  'Offer: ' + b.offer,\n  'Key messages: ' + b.key_messages.map((m, i) => (i + 1) + '. ' + m).join(' '),\n  '',\n  'RULEBOOK',\n  'Tone: ' + rb.tone,\n  'Approved claims (describe the service only in these terms): ' + rb.claims.map((c) => '\"' + c + '\"').join('; '),\n  '',\n  'THE FOOTAGE',\n  'One source clip of ' + S.beats.length + ' beats: ' + beatList + '. Hook H1 opens on S1, hook H2 opens on S4. The lines are spoken over the picture.',\n  '',\n  'TASK',\n  'Write 2 hooks, H1 and H2, each a different angle on the brief. For each hook write one voice-over line per length:',\n  '\"6\" (a 6 second ad, at most 9 words), \"15\" (at most 28 words), \"30\" (at most 60 words). Longer lines include the shorter idea; speak plainly, one spoken sentence at a time.',\n  'Never write a first-person or testimonial-style line (\"I finally sleep through the night\"): the voice is the brand talking about the service. Never promise an outcome.',\n  'For each hook choose 3 b-roll shots (the cutaways in slots A, B, C) from the approved list only, copying the text exactly:',\n  rb.shots.map((s) => '- ' + s).join('\\n'),\n].join('\\n');\nconst schema = {\n  type: 'object', additionalProperties: false, required: ['hooks'],\n  properties: { hooks: { type: 'array', minItems: 2, maxItems: 2, items: {\n    type: 'object', additionalProperties: false, required: ['id', 'lines', 'broll'],\n    properties: {\n      id: { type: 'string', enum: ['H1', 'H2'] },\n      lines: { type: 'object', additionalProperties: false, required: ['6', '15', '30'], properties: { '6': { type: 'string' }, '15': { type: 'string' }, '30': { type: 'string' } } },\n      broll: { type: 'array', minItems: 3, maxItems: 3, items: { type: 'string', enum: rb.shots } },\n    } } } },\n};\nconst body = { model: 'google/gemini-4-argon', messages: [{ role: 'system', content: system }, { role: 'user', content: user }],\n  response_format: { type: 'json_schema', json_schema: { name: 'ad_scripts', strict: true, schema } } };\nconst { body: _b, ...rest } = S;\nreturn [{ json: { ...rest, rulebook: rb, llm_usd: S.llm_usd || 0, body } }];\n"
+   }
+  },
+  {
+   "id": "00000014-0000-4000-8000-000000000000",
+   "name": "Scripts: LLM",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "retryOnFail": true,
+   "maxTries": 2,
+   "waitBetweenTries": 3000,
+   "position": [
+    1150,
+    340
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "https://inference-api.nousresearch.com/v1/chat/completions",
+    "options": {
+     "timeout": 180000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "openAiApi"
+   },
+   "credentials": {
+    "openAiApi": {
+     "name": "Nous"
+    }
+   }
+  },
+  {
+   "id": "00000015-0000-4000-8000-000000000000",
+   "name": "Scripts: validate",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1380,
+    340
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\n// Shape check of the model's JSON; b-roll shots must be rulebook shots.\nconst S = $('Scripts: prompt').first().json;\nconst r = $input.first().json;\nconst MAXW = { '6': 12, '15': 34, '30': 70 };\nlet out;\ntry { out = parseJson(llmText(r)); } catch (e) { throw new Error('scripts: the model did not return JSON (' + e.message + ')'); }\nif (!out || !Array.isArray(out.hooks) || out.hooks.length !== 2) throw new Error('scripts: expected {\"hooks\": [H1, H2]}');\nconst shots = S.rulebook.shots;\nconst norm = (s) => String(s).trim().toLowerCase();\nconst notes = [];\nconst hooks = out.hooks.map((h, i) => {\n  const id = 'H' + (i + 1);\n  if (!h || h.id !== id) throw new Error('scripts: hook ' + (i + 1) + ' must have id ' + id);\n  const lines = {};\n  for (const len of ['6', '15', '30']) {\n    const t = h.lines && typeof h.lines[len] === 'string' ? h.lines[len].trim() : '';\n    if (!t) throw new Error('scripts: ' + id + ' has no ' + len + ' s line');\n    const words = t.split(/\\s+/).length;\n    if (words > MAXW[len]) notes.push(id + ' ' + len + ' s line has ' + words + ' words (more than ' + MAXW[len] + '): it may not fit before the end card');\n    lines[len] = t;\n  }\n  if (!Array.isArray(h.broll) || h.broll.length !== 3) throw new Error('scripts: ' + id + ' needs 3 b-roll shots');\n  const broll = h.broll.map((s) => {\n    const hit = shots.find((x) => norm(x) === norm(s));\n    if (!hit) throw new Error('scripts: ' + id + ' b-roll shot is not in the rulebook: ' + JSON.stringify(s));\n    return hit;\n  });\n  return { id, lines, broll };\n});\nconst { body, ...rest } = S;\nreturn [{ json: { ...rest, hooks, scripts_raw: hooks, script_notes: notes, llm_usd: (S.llm_usd || 0) + cost(r) } }];\n"
+   }
+  },
+  {
+   "id": "00000016-0000-4000-8000-000000000000",
+   "name": "Compliance: collect",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    0,
+    680
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\n// Every line and every b-roll shot gets an id (H1:6, H1:15, H1:30, H1:A, H1:B, H1:C ...) and goes to the hard word list.\nconst S = $input.first().json;\nconst items = [];\nfor (const h of S.hooks) {\n  for (const len of ['6', '15', '30']) items.push({ id: h.id + ':' + len, kind: 'line', hook: h.id, key: len, text: h.lines[len] });\n  ['A', 'B', 'C'].forEach((l, i) => items.push({ id: h.id + ':' + l, kind: 'shot', hook: h.id, key: l, text: h.broll[i] }));\n}\nreturn [{ json: { ...S, comp_items: items, body: { texts: items.map((i) => i.text) } } }];\n"
+   }
+  },
+  {
+   "id": "00000017-0000-4000-8000-000000000000",
+   "name": "Compliance: lint 1 (POST /lint)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    230,
+    680
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://media:8000/lint",
+    "options": {
+     "timeout": 300000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}"
+   }
+  },
+  {
+   "id": "00000018-0000-4000-8000-000000000000",
+   "name": "Compliance: judge prompt",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    460,
+    680
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\n// Second pass: a model judges each line and shot against the rulebook; the hard word list's hits are told to it.\nconst S = $('Compliance: collect').first().json;\nconst hits = $input.first().json.hits;\nconst rb = S.rulebook;\nconst items = S.comp_items.map((it, i) => ({ ...it, hits: hits[i] || [] }));\nconst system = 'You are the compliance reviewer for ads of a fictional sleep telehealth service in Australia. Prescription medicines may not be advertised to the public, and indirect pointers to a medicine count. Return only the JSON asked for.';\nconst user = [\n  'RULES',\n  'Tone: ' + rb.tone,\n  'Allowed ways to describe the service (approved claims): ' + rb.claims.map((c) => '\"' + c + '\"').join('; '),\n  'No testimonial-style or first-person lines. No outcome, result or cure, no promise of better sleep as a result, no medical-treatment pointers, no prices, offers or urgency.',\n  'Pictures and b-roll must not show: ' + rb.banned_media.join('; ') + '.',\n  '',\n  'CHECK each item below. ok is true only when it follows every rule. When ok is false, give \"rewrite\": a compliant replacement with the same job and about the same length, using only the approved claims and a plain, calm voice. For a b-roll shot ok is judged on the picture it describes and its rewrite is an empty string; the shots come from the approved list, so mark one not ok only when it clearly breaks a rule above. When ok is true, rewrite is an empty string.',\n  'An item marked HARD WORD LIST HIT contains a banned word and is not ok; its rewrite must not contain that word or any form of it.',\n  '',\n  'ITEMS',\n  items.map((it) => it.id + ' [' + (it.kind === 'line' ? 'voice-over line' : 'b-roll shot') + ']' + (it.hits.length ? ' HARD WORD LIST HIT: ' + it.hits.join(', ') : '') + ': ' + it.text).join('\\n'),\n].join('\\n');\nconst props = {};\nfor (const it of items) props[it.id] = { type: 'object', additionalProperties: false, required: ['ok', 'rewrite'], properties: { ok: { type: 'boolean' }, rewrite: { type: 'string' } } };\nconst schema = { type: 'object', additionalProperties: false, required: items.map((i) => i.id), properties: props };\nconst body = { model: 'google/gemini-4-argon', messages: [{ role: 'system', content: system }, { role: 'user', content: user }],\n  response_format: { type: 'json_schema', json_schema: { name: 'compliance', strict: true, schema } } };\nreturn [{ json: { ...S, comp_items: items, body } }];\n"
+   }
+  },
+  {
+   "id": "00000019-0000-4000-8000-000000000000",
+   "name": "Compliance: judge (LLM)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "retryOnFail": true,
+   "maxTries": 2,
+   "waitBetweenTries": 3000,
+   "position": [
+    690,
+    680
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "https://inference-api.nousresearch.com/v1/chat/completions",
+    "options": {
+     "timeout": 180000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "openAiApi"
+   },
+   "credentials": {
+    "openAiApi": {
+     "name": "Nous"
+    }
+   }
+  },
+  {
+   "id": "00000020-0000-4000-8000-000000000000",
+   "name": "Compliance: apply 1",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    920,
+    680
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\n// Rewrite once: a line that failed gets the judge's rewrite (linted again next); a failing shot is dropped.\nconst S = $('Compliance: judge prompt').first().json;\nconst r = $input.first().json;\nlet judge;\ntry { judge = parseJson(llmText(r)); } catch (e) { throw new Error('compliance: the judge did not return JSON (' + e.message + ')'); }\nconst items = S.comp_items.map((it) => {\n  const j = judge[it.id] || { ok: false, rewrite: '' };\n  const failed = it.hits.length > 0 || j.ok !== true;\n  const why = [];\n  if (it.hits.length) why.push('hard word list: ' + it.hits.join(', '));\n  if (j.ok !== true) why.push('judge: not ok');\n  if (!failed) return { ...it, status: 'ok', final: it.text, why };\n  if (it.kind === 'shot') return { ...it, status: 'dropped', final: null, why: why.concat('b-roll shots are not rewritten') };\n  const rw = typeof j.rewrite === 'string' ? j.rewrite.trim() : '';\n  if (!rw || rw === it.text) return { ...it, status: 'dropped', final: null, why: why.concat('no usable rewrite') };\n  return { ...it, status: 'rewritten', rewrite: rw, final: rw, why };\n});\nconst rewritten = items.filter((i) => i.status === 'rewritten');\nconst { body, ...rest } = S;\nreturn [{ json: { ...rest, comp_items: items, llm_usd: (S.llm_usd || 0) + cost(r), body: { texts: rewritten.map((i) => i.rewrite) } } }];\n"
+   }
+  },
+  {
+   "id": "00000021-0000-4000-8000-000000000000",
+   "name": "Compliance: lint 2 (POST /lint)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1150,
+    680
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://media:8000/lint",
+    "options": {
+     "timeout": 300000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}"
+   }
+  },
+  {
+   "id": "00000022-0000-4000-8000-000000000000",
+   "name": "Compliance: apply 2",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1380,
+    680
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\n// A rewrite that still hits the word list is dropped; hooks left without lines are dropped; the report notes all of it.\nconst S = $('Compliance: apply 1').first().json;\nconst hits = $input.first().json.hits || [];\nlet k = 0;\nconst items = S.comp_items.map((it) => {\n  if (it.status !== 'rewritten') return it;\n  const h = hits[k++] || [];\n  return h.length ? { ...it, status: 'dropped', final: null, why: it.why.concat('rewrite failed the hard word list again: ' + h.join(', ')) } : it;\n});\nconst notes = [];\nconst hooks = [];\nfor (const h of S.hooks) {\n  const lines = {};\n  for (const len of ['6', '15', '30']) {\n    const it = items.find((i) => i.id === h.id + ':' + len);\n    if (it.final) lines[len] = it.final; else notes.push(h.id + ' ' + len + ' s line dropped (' + it.why.join('; ') + ')');\n  }\n  const broll = ['A', 'B', 'C'].map((l) => { const it = items.find((i) => i.id === h.id + ':' + l); if (!it.final) notes.push(h.id + ' b-roll ' + l + ' dropped (' + it.why.join('; ') + ')'); return it.final; });\n  if (!Object.keys(lines).length) { notes.push(h.id + ' dropped: no line left'); continue; }\n  hooks.push({ id: h.id, lines, broll });\n}\nfor (const it of items) if (it.status === 'rewritten') notes.push(it.id + ' rewritten: \"' + it.text + '\" -> \"' + it.final + '\"');\nif (!hooks.length) throw new Error('compliance: no hook has a line left after the checks');\nconst { body, ...rest } = S;\nconst compliance = { items: items.map(({ id, kind, status, text, final, why }) => ({ id, kind, status, text, final, why })), notes };\nreturn [{ json: { ...rest, hooks, compliance } }];\n"
+   }
+  },
+  {
+   "id": "00000023-0000-4000-8000-000000000000",
+   "name": "Look: from the brief?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    0,
+    1020
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.brief.look }}",
+       "rightValue": "",
+       "operator": {
+        "type": "string",
+        "operation": "notEmpty",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000024-0000-4000-8000-000000000000",
+   "name": "Look: brief line",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    230,
+    901
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const S = $input.first().json;\nreturn [{ json: { ...S, look: { line: S.brief.look, source: 'brief', tries: 0 } } }];\n"
+   }
+  },
+  {
+   "id": "00000025-0000-4000-8000-000000000000",
+   "name": "Look: frames prep",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    230,
+    1139
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The middles of S1, S3 and S5 (spec 4.3, matching part 1).\nconst S = $input.first().json;\nconst by = Object.fromEntries(S.beats.map((b) => [b.name, b]));\nconst at = ['S1', 'S3', 'S5'].map((n) => Math.round(((by[n].start + by[n].end) / 2) * 100) / 100);\nreturn [{ json: { ...S, look_at: at, body: { file: S.source, at } } }];\n"
+   }
+  },
+  {
+   "id": "00000026-0000-4000-8000-000000000000",
+   "name": "Look: frames (POST /frames)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    460,
+    1139
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://media:8000/frames",
+    "options": {
+     "timeout": 300000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}"
+   }
+  },
+  {
+   "id": "00000027-0000-4000-8000-000000000000",
+   "name": "Look: files",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    690,
+    1139
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const r = $input.first().json;\nreturn r.files.map((f) => ({ json: { path: '/data/' + f, rel: f } }));\n"
+   }
+  },
+  {
+   "id": "00000028-0000-4000-8000-000000000000",
+   "name": "Look: read frames",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    920,
+    1139
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "={{ $json.path }}",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   }
+  },
+  {
+   "id": "00000029-0000-4000-8000-000000000000",
+   "name": "Look: vision prompt",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1150,
+    1139
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\nconst S = $('Look: frames prep').first().json;\nconst files = $('Look: files').all().map((i) => i.json.rel);\nconst items = $input.all();\nconst parts = [{ type: 'text', text: 'Describe only the look of these frames in one line of at most 30 words for a cinematographer: light sources and their colour, time of day, palette, contrast, lens and depth of field, grain. Do not mention people, bodies, objects\\' brands or text. Answer with the line only.' }];\nfor (let i = 0; i < items.length; i++) {\n  const buf = await this.helpers.getBinaryDataBuffer(i, 'data');\n  parts.push({ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + buf.toString('base64') } });\n}\nconst { body: _b, ...rest } = S;\nreturn [{ json: { ...rest, look_frames: files, body: { model: 'google/gemini-4-argon', messages: [{ role: 'user', content: parts }] } } }];\n"
+   }
+  },
+  {
+   "id": "00000030-0000-4000-8000-000000000000",
+   "name": "Look: vision 1 (LLM)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "retryOnFail": true,
+   "maxTries": 2,
+   "waitBetweenTries": 3000,
+   "position": [
+    1380,
+    1139
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "https://inference-api.nousresearch.com/v1/chat/completions",
+    "options": {
+     "timeout": 180000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "openAiApi"
+   },
+   "credentials": {
+    "openAiApi": {
+     "name": "Nous"
+    }
+   }
+  },
+  {
+   "id": "00000031-0000-4000-8000-000000000000",
+   "name": "Look: clean 1",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1610,
+    1139
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\nconst S = $('Look: vision prompt').first().json;\nconst r = $input.first().json;\nconst clean = (t) => { let s = String(t).split(/\\r?\\n/).map((x) => x.trim()).filter(Boolean)[0] || ''; s = s.replace(/^[-*\\s\"'`]+|[\"'`\\s]+$/g, '').replace(/^(look|line)\\s*:\\s*/i, ''); const w = s.split(/\\s+/).filter(Boolean); if (w.length > 30) s = w.slice(0, 30).join(' ').replace(/[,;:\\s]+$/, ''); return s; };\nconst line = clean(llmText(r));\nconst { body, ...rest } = S;\nreturn [{ json: { ...rest, look_try1: line, llm_usd: (S.llm_usd || 0) + cost(r), body: { texts: [line] } } }];\n"
+   }
+  },
+  {
+   "id": "00000032-0000-4000-8000-000000000000",
+   "name": "Look: lint 1 (POST /lint)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    1840,
+    1139
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://media:8000/lint",
+    "options": {
+     "timeout": 300000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}"
+   }
+  },
+  {
+   "id": "00000033-0000-4000-8000-000000000000",
+   "name": "Look: check 1",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2070,
+    1139
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\nconst S = $('Look: clean 1').first().json;\nconst hits = ($input.first().json.hits || [[]])[0];\nconst { body, ...rest } = S;\nreturn [{ json: { ...rest, look_hits1: hits, look_ok1: hits.length === 0 && S.look_try1.length > 0 } }];\n"
+   }
+  },
+  {
+   "id": "00000034-0000-4000-8000-000000000000",
+   "name": "Look: clean?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2300,
+    1139
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.look_ok1 }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000035-0000-4000-8000-000000000000",
+   "name": "Look: use line 1",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2530,
+    1054
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const S = $input.first().json;\nreturn [{ json: { ...S, look: { line: S.look_try1, source: 'vision', tries: 1 } } }];\n"
+   }
+  },
+  {
+   "id": "00000036-0000-4000-8000-000000000000",
+   "name": "Look: retry prompt",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2530,
+    1258
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// One retry: the same frames, told which words to avoid.\nconst S = $input.first().json;\nconst first = $('Look: vision prompt').first().json.body;\nconst avoid = S.look_hits1.length ? 'Your last answer used words that are not allowed (' + S.look_hits1.join(', ') + '). Do not use them or their forms.' : 'Your last answer was empty. Answer with one line.';\nconst messages = JSON.parse(JSON.stringify(first.messages));\nmessages[0].content[0].text += ' ' + avoid;\nconst { body, ...rest } = S;\nreturn [{ json: { ...rest, body: { model: first.model, messages } } }];\n"
+   }
+  },
+  {
+   "id": "00000037-0000-4000-8000-000000000000",
+   "name": "Look: vision 2 (LLM)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "retryOnFail": true,
+   "maxTries": 2,
+   "waitBetweenTries": 3000,
+   "position": [
+    2760,
+    1258
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "https://inference-api.nousresearch.com/v1/chat/completions",
+    "options": {
+     "timeout": 180000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}",
+    "authentication": "predefinedCredentialType",
+    "nodeCredentialType": "openAiApi"
+   },
+   "credentials": {
+    "openAiApi": {
+     "name": "Nous"
+    }
+   }
+  },
+  {
+   "id": "00000038-0000-4000-8000-000000000000",
+   "name": "Look: clean 2",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2990,
+    1258
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\nconst S = $('Look: retry prompt').first().json;\nconst r = $input.first().json;\nconst clean = (t) => { let s = String(t).split(/\\r?\\n/).map((x) => x.trim()).filter(Boolean)[0] || ''; s = s.replace(/^[-*\\s\"'`]+|[\"'`\\s]+$/g, '').replace(/^(look|line)\\s*:\\s*/i, ''); const w = s.split(/\\s+/).filter(Boolean); if (w.length > 30) s = w.slice(0, 30).join(' ').replace(/[,;:\\s]+$/, ''); return s; };\nconst line = clean(llmText(r));\nconst { body, ...rest } = S;\nreturn [{ json: { ...rest, look_try2: line, llm_usd: (S.llm_usd || 0) + cost(r), body: { texts: [line] } } }];\n"
+   }
+  },
+  {
+   "id": "00000039-0000-4000-8000-000000000000",
+   "name": "Look: lint 2 (POST /lint)",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    3220,
+    1258
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "http://media:8000/lint",
+    "options": {
+     "timeout": 300000
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "={{ $json.body }}"
+   }
+  },
+  {
+   "id": "00000040-0000-4000-8000-000000000000",
+   "name": "Look: decide",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3450,
+    1258
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst strip = (o) => { const { body, ...rest } = o; return rest; };\n\n// Second try clean: use it. Otherwise the rulebook's look_fallback.\nconst S = $('Look: clean 2').first().json;\nconst hits = ($input.first().json.hits || [[]])[0];\nconst { body, ...rest } = S;\nconst ok = hits.length === 0 && S.look_try2.length > 0;\nconst look = ok ? { line: S.look_try2, source: 'vision', tries: 2 } : { line: S.rulebook.look_fallback, source: 'fallback', tries: 2, rejected: [S.look_try1, S.look_try2] };\nreturn [{ json: { ...rest, look_hits2: hits, look } }];\n"
+   }
+  },
+  {
+   "id": "00000041-0000-4000-8000-000000000000",
+   "name": "Look: ready",
+   "type": "n8n-nodes-base.noOp",
+   "typeVersion": 1,
+   "position": [
+    3680,
+    1105
+   ],
+   "parameters": {}
+  },
+  {
+   "id": "00000042-0000-4000-8000-000000000000",
+   "name": "B-roll: dry run?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    0,
+    1530
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.dry_run }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000043-0000-4000-8000-000000000000",
+   "name": "B-roll: read stand-in clips",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    230,
+    1462
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "/data/brand/fixtures/broll/*.mp4",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   }
+  },
+  {
+   "id": "00000044-0000-4000-8000-000000000000",
+   "name": "B-roll: expand to the 12 names",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    460,
+    1462
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// Dry run: 6 stand-in clips (A, B, C at both sizes) -> one copy per hook shot kept by the compliance pass.\nconst S = $('Look: ready').first().json;\nconst fx = $input.all();\nconst sizes = ['1344x768', '768x1344'];\nconst out = [];\nfor (const h of S.hooks) h.broll.forEach((shot, i) => {\n  if (!shot) return;\n  const letter = 'ABC'[i];\n  for (const size of sizes) {\n    const f = fx.find((x) => x.binary && x.binary.data && x.binary.data.fileName === letter + '_' + size + '.mp4');\n    if (!f) throw new Error('broll: fixture ' + letter + '_' + size + '.mp4 is not in the brand fixtures folder');\n    out.push({ json: { path: '/data/runs/' + S.run_id + '/broll/' + h.id + letter + '_' + size + '.mp4', clip: h.id + letter, size }, binary: { data: f.binary.data } });\n  }\n});\nif (!out.length) throw new Error('broll: no shot left to cover');\nreturn out;\n"
+   }
+  },
+  {
+   "id": "00000045-0000-4000-8000-000000000000",
+   "name": "B-roll: write clip",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    690,
+    1462
+   ],
+   "parameters": {
+    "operation": "write",
+    "fileName": "={{ $json.path }}",
+    "dataPropertyName": "data",
+    "options": {}
+   }
+  },
+  {
+   "id": "00000046-0000-4000-8000-000000000000",
+   "name": "B-roll: done",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    920,
+    1462
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const S = $('Look: ready').first().json;\nconst clips = {};\nconst files = [];\nfor (const it of $input.all()) {\n  const { clip, size, path } = it.json;\n  clips[clip] = clips[clip] || {};\n  clips[clip][size === '1344x768' ? 'wide' : 'tall'] = path.replace(/^\\/data\\//, '');\n  files.push(path.replace(/^\\/data\\//, ''));\n}\nreturn [{ json: { ...S, broll: { mode: 'fixtures', clips, files } } }];\n"
+   }
+  },
+  {
+   "id": "00000047-0000-4000-8000-000000000000",
+   "name": "B-roll live: GET /api/pods (stub, disabled)",
+   "disabled": true,
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    230,
+    1666.0000000000002
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "https://toolkit.example.com/api/pods",
+    "options": {
+     "timeout": 300000
+    }
+   }
+  },
+  {
+   "id": "00000048-0000-4000-8000-000000000000",
+   "name": "B-roll live: not deployed",
+   "type": "n8n-nodes-base.stopAndError",
+   "typeVersion": 1,
+   "position": [
+    460,
+    1666.0000000000002
+   ],
+   "parameters": {
+    "errorMessage": "Live b-roll (pods and the toolkit's /api/broll) is not built yet: run with Dry run ticked."
+   }
+  },
+  {
+   "id": "00000049-0000-4000-8000-000000000000",
+   "name": "Run data: build run.json",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1150,
+    1462
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The run's own record, next to the clip: runs/<id>/run.json\nconst S = $input.first().json;\nconst { body, ...rest } = S;\nconst data = { ...rest, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: data, binary: { data: bin } }];\n"
+   }
+  },
+  {
+   "id": "00000050-0000-4000-8000-000000000000",
+   "name": "Run data: write run.json",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    1380,
+    1462
+   ],
+   "parameters": {
+    "operation": "write",
+    "fileName": "=/data/runs/{{ $execution.id }}/run.json",
+    "dataPropertyName": "data",
+    "options": {}
+   }
+  },
+  {
+   "id": "00000051-0000-4000-8000-000000000000",
+   "name": "Run: summary",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1610,
+    1462
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const S = $input.first().json;\nreturn [{ json: {\n  run_id: S.run_id, dry_run: S.dry_run, source: S.source, source_origin: S.source_origin,\n  beats: S.beats.map((b) => b.name + ' ' + b.start + '-' + b.end + ' ' + b.role + ' ' + JSON.stringify(b.x || b.face)),\n  reframe_sheet: S.reframe.sheet, reframe_flags: S.reframe.flags,\n  hooks: S.hooks.map((h) => ({ id: h.id, lines: h.lines, broll: h.broll })),\n  compliance_notes: S.compliance.notes, look: S.look, broll_files: S.broll.files, llm_usd: S.llm_usd,\n} }];\n"
+   }
+  },
+  {
+   "id": "00000052-0000-4000-8000-000000000000",
+   "name": "→ 12b: render",
+   "type": "n8n-nodes-base.noOp",
+   "typeVersion": 1,
+   "position": [
+    1840,
+    1462
+   ],
+   "parameters": {}
+  },
+  {
+   "id": "00000053-0000-4000-8000-000000000000",
+   "name": "Note 53",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -20,
+    -60
+   ],
+   "parameters": {
+    "content": "## 1 Brief and source\nBasic Auth form -> run folder -> source.mp4 (upload, or https link) -> beats parsed and checked with /reframe.",
+    "width": 1700,
+    "height": 330,
+    "color": 7
+   }
+  },
+  {
+   "id": "00000054-0000-4000-8000-000000000000",
+   "name": "Note 54",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    670,
+    280
+   ],
+   "parameters": {
+    "content": "## 2 Scripts\nRulebook -> LLM (2 hooks x 3 lengths, 3 b-roll shots each, structured output) -> shape check.",
+    "width": 1000,
+    "height": 240,
+    "color": 4
+   }
+  },
+  {
+   "id": "00000055-0000-4000-8000-000000000000",
+   "name": "Note 55",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -20,
+    620
+   ],
+   "parameters": {
+    "content": "## 3 Compliance\nHard word list (/lint) + judge LLM, rewrite once, lint again, drop. Shots that fail are dropped.",
+    "width": 1700,
+    "height": 240,
+    "color": 3
+   }
+  },
+  {
+   "id": "00000056-0000-4000-8000-000000000000",
+   "name": "Note 56",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -20,
+    790
+   ],
+   "parameters": {
+    "content": "## 4 Look line (spec 4.3 part 1)\nVision on the middles of S1, S3, S5; one retry if the word list hits; then the rulebook's look_fallback. The brief's Look overrides.",
+    "width": 3900,
+    "height": 140,
+    "color": 5
+   }
+  },
+  {
+   "id": "00000057-0000-4000-8000-000000000000",
+   "name": "Note 57",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -20,
+    1300
+   ],
+   "parameters": {
+    "content": "## 5 B-roll\nDry run: stand-in clips copied to runs/<id>/broll/ (12 files). Live (pods + /api/broll): disabled stub, the toolkit side is not deployed. Run stops at '→ 12b: render'.",
+    "width": 2100,
+    "height": 190,
+    "color": 6
+   }
+  }
+ ],
+ "connections": {
+  "Brief form": {
+   "main": [
+    [
+     {
+      "node": "Run: ids and brief",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run: ids and brief": {
+   "main": [
+    [
+     {
+      "node": "Run: folder (POST /run)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run: folder (POST /run)": {
+   "main": [
+    [
+     {
+      "node": "Run: restore",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run: restore": {
+   "main": [
+    [
+     {
+      "node": "Source: link given?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Source: link given?": {
+   "main": [
+    [
+     {
+      "node": "Source: download (https)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Source: write source.mp4",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Source: download (https)": {
+   "main": [
+    [
+     {
+      "node": "Source: write source.mp4",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Source: write source.mp4": {
+   "main": [
+    [
+     {
+      "node": "Source: ready",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Source: ready": {
+   "main": [
+    [
+     {
+      "node": "Beats: parse",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Beats: parse": {
+   "main": [
+    [
+     {
+      "node": "Beats: validate (POST /reframe)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Beats: validate (POST /reframe)": {
+   "main": [
+    [
+     {
+      "node": "Reframe: keep",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Reframe: keep": {
+   "main": [
+    [
+     {
+      "node": "Rulebook: get",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Rulebook: get": {
+   "main": [
+    [
+     {
+      "node": "Scripts: prompt",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Scripts: prompt": {
+   "main": [
+    [
+     {
+      "node": "Scripts: LLM",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Scripts: LLM": {
+   "main": [
+    [
+     {
+      "node": "Scripts: validate",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Scripts: validate": {
+   "main": [
+    [
+     {
+      "node": "Compliance: collect",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Compliance: collect": {
+   "main": [
+    [
+     {
+      "node": "Compliance: lint 1 (POST /lint)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Compliance: lint 1 (POST /lint)": {
+   "main": [
+    [
+     {
+      "node": "Compliance: judge prompt",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Compliance: judge prompt": {
+   "main": [
+    [
+     {
+      "node": "Compliance: judge (LLM)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Compliance: judge (LLM)": {
+   "main": [
+    [
+     {
+      "node": "Compliance: apply 1",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Compliance: apply 1": {
+   "main": [
+    [
+     {
+      "node": "Compliance: lint 2 (POST /lint)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Compliance: lint 2 (POST /lint)": {
+   "main": [
+    [
+     {
+      "node": "Compliance: apply 2",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Compliance: apply 2": {
+   "main": [
+    [
+     {
+      "node": "Look: from the brief?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: from the brief?": {
+   "main": [
+    [
+     {
+      "node": "Look: brief line",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Look: frames prep",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: frames prep": {
+   "main": [
+    [
+     {
+      "node": "Look: frames (POST /frames)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: frames (POST /frames)": {
+   "main": [
+    [
+     {
+      "node": "Look: files",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: files": {
+   "main": [
+    [
+     {
+      "node": "Look: read frames",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: read frames": {
+   "main": [
+    [
+     {
+      "node": "Look: vision prompt",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: vision prompt": {
+   "main": [
+    [
+     {
+      "node": "Look: vision 1 (LLM)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: vision 1 (LLM)": {
+   "main": [
+    [
+     {
+      "node": "Look: clean 1",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: clean 1": {
+   "main": [
+    [
+     {
+      "node": "Look: lint 1 (POST /lint)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: lint 1 (POST /lint)": {
+   "main": [
+    [
+     {
+      "node": "Look: check 1",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: check 1": {
+   "main": [
+    [
+     {
+      "node": "Look: clean?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: clean?": {
+   "main": [
+    [
+     {
+      "node": "Look: use line 1",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Look: retry prompt",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: retry prompt": {
+   "main": [
+    [
+     {
+      "node": "Look: vision 2 (LLM)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: vision 2 (LLM)": {
+   "main": [
+    [
+     {
+      "node": "Look: clean 2",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: clean 2": {
+   "main": [
+    [
+     {
+      "node": "Look: lint 2 (POST /lint)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: lint 2 (POST /lint)": {
+   "main": [
+    [
+     {
+      "node": "Look: decide",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: brief line": {
+   "main": [
+    [
+     {
+      "node": "Look: ready",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: use line 1": {
+   "main": [
+    [
+     {
+      "node": "Look: ready",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: decide": {
+   "main": [
+    [
+     {
+      "node": "Look: ready",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Look: ready": {
+   "main": [
+    [
+     {
+      "node": "B-roll: dry run?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll: dry run?": {
+   "main": [
+    [
+     {
+      "node": "B-roll: read stand-in clips",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "B-roll live: GET /api/pods (stub, disabled)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll: read stand-in clips": {
+   "main": [
+    [
+     {
+      "node": "B-roll: expand to the 12 names",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll: expand to the 12 names": {
+   "main": [
+    [
+     {
+      "node": "B-roll: write clip",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll: write clip": {
+   "main": [
+    [
+     {
+      "node": "B-roll: done",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll live: GET /api/pods (stub, disabled)": {
+   "main": [
+    [
+     {
+      "node": "B-roll live: not deployed",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll: done": {
+   "main": [
+    [
+     {
+      "node": "Run data: build run.json",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run data: build run.json": {
+   "main": [
+    [
+     {
+      "node": "Run data: write run.json",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run data: write run.json": {
+   "main": [
+    [
+     {
+      "node": "Run: summary",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run: summary": {
+   "main": [
+    [
+     {
+      "node": "→ 12b: render",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}

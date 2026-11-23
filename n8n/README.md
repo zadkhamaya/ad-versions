@@ -1,0 +1,118 @@
+# The n8n workflow (first half: brief to b-roll)
+
+Two exported workflows, credentials stripped (names kept):
+
+| File | Workflow | What it does |
+|---|---|---|
+| `workflow.json` | **ad-versions** | brief form → source clip → beats → scripts → compliance → look line → b-roll (dry run). Stops at the no-op `→ 12b: render`; rendering, QA, approval and handover come next. |
+| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time) and stops. Telegram and pod clean-up come with the live b-roll. |
+
+Built and tested on n8n **2.46.6** (the tag pinned in `docker/.env`).
+
+## What each part does
+
+Every node is named for its job; the run is the execution id (`run_id`), and everything lands in `/data/runs/<run_id>/`.
+
+1. **Brief form** (Form Trigger, Basic Auth). Fields, in order: Brand, Product, Audience, Offer, Key message 1/2/3,
+   Required disclaimer (pre-filled with the rulebook's), Source clip (`.mp4`/`.mov`), Source clip link (https, for a
+   file over 90 MB; used instead of the upload when both are given), Beats, Look (optional), Dry run.
+2. **Run: ids and brief** → **Run: folder** (`POST /run`, because n8n's file nodes write only into an existing folder) →
+   **Source: link given?** → download (https only, response as file) or the upload → **Source: write source.mp4**.
+3. **Beats: parse** (Code) turns the Beats text into the service's `beats` (syntax below); **Beats: validate** is
+   `POST /reframe` on the real clip: it refuses beats outside the clip, suggests windows for `auto` beats and draws the
+   sheet. **Reframe: keep** stores the suggestions, the sheet path (`runs/<id>/reframe.jpg`) and the review/split flags.
+4. **Scripts**: `GET /rulebook` → one LLM call with structured output (`json_schema`, strict): 2 hooks, a voice-over line
+   for 6, 15 and 30 s, 3 b-roll shots per hook, each shot an enum of the rulebook's `shots` → **Scripts: validate**
+   (shape, shots in the rulebook, word budgets noted).
+5. **Compliance**: `POST /lint` on every line and shot (the hard word list) → a second LLM call judges each against
+   `banned_media`, the approved claims and the tone (no testimonial lines, no outcomes) and returns
+   `{"<id>": {"ok", "rewrite"}}` → **apply 1** rewrites a failing line once (a failing shot is dropped, not rewritten) →
+   `POST /lint` again on the rewrites → **apply 2** drops a rewrite that still hits, drops a hook left without lines,
+   and writes `compliance.notes` (each rewrite before → after, each drop and why). Line ids are `H1:6`, `H1:15`,
+   `H1:30`; shot ids `H1:A`, `H1:B`, `H1:C`.
+6. **Look line** (spec 4.3 part 1): the Look field wins when filled; otherwise `POST /frames` at the middles of S1, S3
+   and S5 → the files are read and sent to the vision model with the spec's prompt → `POST /lint` on the line → one
+   retry naming the hit words → the rulebook's `look_fallback`. The line (and where it came from: `brief`, `vision`
+   or `fallback`) is kept in the run data.
+7. **B-roll**, **dry run** branch: copies the six stand-in clips (`A|B|C` × `1344x768|768x1344`) from
+   `/data/brand/fixtures/broll/` to `runs/<id>/broll/<hook><A|B|C>_<size>.mp4`: 12 files for two hooks, fewer when the
+   compliance pass dropped a shot. The **live** branch (toolkit pods and `/api/broll`) is a disabled stub node plus a
+   Stop and Error: the toolkit side is not deployed yet, so a run with Dry run unticked stops there on purpose.
+8. **Run data**: `runs/<id>/run.json` holds the whole run so far (brief, beats, reframe, scripts, compliance, look,
+   b-roll, LLM cost); **Run: summary** is the short view; **→ 12b: render** is where rendering will attach.
+
+## Credentials it expects, by name
+
+| Name | Type | Used by |
+|---|---|---|
+| `Nous` | OpenAI API, Base URL `https://inference-api.nousresearch.com/v1` | every LLM and vision node (HTTP Request nodes using the credential's key; the URL is in the node). Model `google/gemini-4-argon`. |
+| `brief-form` | Basic Auth (user `brief`) | the Brief form's login. Without it the form answers 401. |
+| `telegram-demo` | Telegram | later (approval and handover messages) |
+| R2 | | not in n8n: it is in the media service's env |
+
+The LLM nodes are HTTP Request nodes, not the OpenAI nodes: with a custom base URL they let the body carry
+`response_format` (structured outputs) and image parts as the API defines them, and the cost the API reports
+(`usage.cost`) is summed into `llm_usd` in the run data.
+
+## Dry run
+
+The form's **Dry run** checkbox is ticked by default. Ticked (or the field missing from a post) = stand-in b-roll, no
+GPU, no spend. Unticked (`[]`) = the live branch, which for now stops with an error.
+
+## Beats syntax
+
+One beat per line: `NAME START-END ROLE [POSITION ...]`. Blank lines and `# comments` are ignored; all of S1 to S6
+appear once.
+
+```
+S1 0.5-6.0 opener-H1 centre
+S2 6.6-9.3 tension
+S3 9.6-15.0 routine auto
+S4 15.5-21.5 opener-H2 x9=0.21,x1=0.30
+S5 21.9-26.8 calm x9=0.35
+S6 27.5-31.5 close 0.7 x1=0.42
+```
+
+`POSITION` is where the 9:16 and 1:1 crop windows sit; it may be left out (= `centre`):
+
+| Token | Becomes (media service) |
+|---|---|
+| `left`, `centre` (or `center`), `right`, `auto` | `face` |
+| a number `0` to `1` | `face`: the window's centre as a share of the source width |
+| `x9=0.21`, `x1=0.30` (also `9x16=`, `1x1=`), alone or comma-joined | `x`: `{"9X16": 0.21, "1X1": 0.30}`, which wins over `face` for that format |
+
+`auto` follows movement and faces, not meaning: set `x` for a beat whose point is something still.
+
+## Setup on the box
+
+- The n8n container needs `N8N_RESTRICT_FILE_ACCESS_TO=/data` (n8n 2.x refuses file nodes outside its own folder
+  otherwise). The compose file's env file is where it goes, next to `N8N_DEFAULT_BINARY_DATA_MODE=filesystem`,
+  `N8N_PAYLOAD_SIZE_MAX=100` and `N8N_FORMDATA_FILE_SIZE_MAX=100`.
+- The media service must have `POST /run` (see `docs/api.md`).
+- The dry-run clips live in the data folder: `n8n/fixtures/make-broll.sh` makes them (`n8n/fixtures/broll/` ships in
+  the repo, six files of about 85 KB); copy that folder to `/data/brand/fixtures/broll/` once.
+
+## Import
+
+1. In n8n create the credentials above (`Nous`, `brief-form`).
+2. Import `errors.json`, then `workflow.json` (Workflows → Import from file, or `POST /api/v1/workflows` with the
+   file). Credentials are matched by name.
+3. In **ad-versions** → Settings → Error workflow, pick **ad-versions errors**, and publish both (an error workflow
+   must be active to run).
+4. Publish **ad-versions**; the form is at `/form/brief`.
+
+## Posting the form from a script
+
+Fields are `field-0` to `field-12` in the order above (Brand is 0, Offer 3, the file 8, the link 9, Beats 10, Look 11,
+Dry run 12). Checkbox values are a JSON array:
+
+```
+curl -u brief:$PASSWORD http://127.0.0.1:5678/form/brief \
+  --form-string field-0=BRAND ... -F "field-8=@clip.mp4;type=video/mp4" \
+  --form-string "field-10=$BEATS" --form-string 'field-12=["Dry run: stand-in b-roll, no GPU"]'
+```
+
+## Not built yet (12b and later)
+
+Rendering the 18 versions, QA, the contact sheet and Telegram approval, the handover package, the live b-roll branch,
+pod clean-up and the Telegram message in the error workflow.
