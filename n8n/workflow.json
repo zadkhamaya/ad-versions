@@ -70,7 +70,7 @@
        "fieldLabel": "Source clip link",
        "fieldType": "text",
        "requiredField": false,
-       "placeholder": "https://... (for a clip over 90 MB; used instead of the file)"
+       "placeholder": "https://... (for a clip over 90 MB, up to 400 MB; used instead of the file)"
       },
       {
        "fieldLabel": "Beats",
@@ -254,7 +254,7 @@
   },
   {
    "id": "00000009-0000-4000-8000-000000000000",
-   "name": "Source: size cap (95 MB)",
+   "name": "Source: size cap (400 MB)",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
@@ -263,7 +263,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// The link's download is capped (single constant): refuse before anything is written into the run.\nconst MAX_MB = 95;\nconst b = $input.first().binary && $input.first().binary.data;\nif (!b) throw new Error('the link gave no file');\nconst bytes = Number(b.bytes || 0);\nif (bytes > MAX_MB * 1024 * 1024) throw new Error('the linked file is ' + Math.round(bytes / 1048576) + ' MB; the limit is ' + MAX_MB + ' MB');\nreturn $input.all();\n"
+    "jsCode": "// The link's download is capped (single constant): refuse before anything is written into the run.\nconst MAX_MB = 400;\nconst b = $input.first().binary && $input.first().binary.data;\nif (!b) throw new Error('the link gave no file');\nconst bytes = Number(b.bytes || 0);\nif (bytes > MAX_MB * 1024 * 1024) throw new Error('the linked file is ' + Math.round(bytes / 1048576) + ' MB; the limit is ' + MAX_MB + ' MB');\nreturn $input.all();\n"
    }
   },
   {
@@ -1342,14 +1342,14 @@
    "main": [
     [
      {
-      "node": "Source: size cap (95 MB)",
+      "node": "Source: size cap (400 MB)",
       "type": "main",
       "index": 0
      }
     ]
    ]
   },
-  "Source: size cap (95 MB)": {
+  "Source: size cap (400 MB)": {
    "main": [
     [
      {

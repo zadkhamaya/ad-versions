@@ -21,7 +21,7 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    spacing and punctuation ignored), else the run stops at once with "the brief's disclaimer differs from the approved one
    in the rulebook"; the rulebook's text is the one that goes on the end card (`disclaimer` in the run state) →
    **Source: link given?** → download (https only, redirects are not followed, so the check covers the whole fetch;
-   **Source: size cap** refuses a file over 95 MB, one constant in that node) or the upload → **Source: write source.mp4**.
+   **Source: size cap (400 MB)** refuses a larger file, one constant in that node; uploads are limited to 90 MB, links to 400 MB) or the upload → **Source: write source.mp4**.
 3. **Beats: parse** (Code) turns the Beats text into the service's `beats` (syntax below); **Beats: validate** is
    `POST /reframe` on the real clip: it refuses beats outside the clip, suggests windows for `auto` beats and draws the
    sheet. **Reframe: keep** stores the suggestions, the sheet path (`runs/<id>/reframe.jpg`) and the review/split flags.
