@@ -1,4 +1,5 @@
 import subprocess
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -104,3 +105,44 @@ def test_a_long_disclaimer_shrinks_to_fit_the_height(tmp_path, fmt, with_logo):
 def test_a_disclaimer_that_cannot_fit_at_a_legible_size_is_refused(tmp_path):
     with pytest.raises(ValueError, match="too long"):
         endcard.make("16X9", ("word " * 800).strip(), tmp_path / "e.png")
+
+
+# ---- the brand logo: brand/logo.png, made by brand/make-logo.sh ----
+
+BRAND_DIR = Path(__file__).resolve().parents[1] / "brand"
+
+
+def _rgba(path, w, h):
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
+                         capture_output=True, check=True).stdout
+    return np.frombuffer(raw, np.uint8).reshape(h, w, 4)
+
+
+def test_the_logo_is_a_trimmed_offwhite_wordmark_on_transparent():
+    logo = BRAND_DIR / "logo.png"
+    assert 0 < logo.stat().st_size < 200_000
+    w, h = endcard._size(str(logo))
+    assert w == 1600 and 200 <= h <= 500                              # about 1600 px wide, a wordmark's proportions
+    px = _rgba(logo, w, h)
+    alpha = px[..., 3]
+    assert alpha[0, 0] == 0 and alpha[-1, -1] == 0                    # transparent outside the letters
+    ys, xs = np.where(alpha > 128)
+    assert xs.min() <= 4 and xs.max() >= w - 5 and ys.min() <= 4 and ys.max() >= h - 5   # tightly trimmed (the bbox touches all four sides)
+    solid = px[alpha == 255][:, :3]
+    assert len(solid) > 1000 and (solid == [0xF3, 0xEE, 0xE6]).all()       # one flat warm off-white
+
+
+def test_the_logo_script_makes_the_same_logo(tmp_path):
+    out = tmp_path / "again.png"
+    subprocess.run(["bash", str(BRAND_DIR / "make-logo.sh"), str(out)], check=True, capture_output=True)
+    assert endcard._size(str(out)) == endcard._size(str(BRAND_DIR / "logo.png"))
+    assert (BRAND_DIR / "fonts" / "OFL-Lora.txt").read_text().count("SIL OPEN FONT LICENSE") >= 1
+
+
+@needs_drawtext
+@pytest.mark.parametrize("fmt", ["9X16", "16X9"])
+def test_the_end_card_with_the_brand_logo_fits(tmp_path, fmt):
+    W, H = FORMATS[fmt]
+    out = tmp_path / "e.png"
+    info = endcard.make(fmt, DISCLAIMER, out, logo=BRAND_DIR / "logo.png", brand="Restfield")
+    assert info["logo"] is True and _bright(_png_pixels(out, W, H)).any()

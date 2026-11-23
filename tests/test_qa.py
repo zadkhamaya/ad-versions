@@ -292,3 +292,27 @@ def test_sheet_marks_pass_green_and_fail_red_on_the_cell_edge(media, tmp_path):
 def test_sheet_status_must_match_the_files(tmp_path):
     with pytest.raises(ValueError):
         sheet.make(["a.mp4", "b.mp4"], str(tmp_path / "s.jpg"), status=["pass"])
+
+
+# ---- hotwords: a split name counts as one word ----
+
+def test_a_hotword_heard_as_two_words_is_one_word():
+    assert qa.script_diff("Restfield helps", "rest field helps", hotwords="Restfield") == 0.0
+    assert qa.script_diff("Restfield helps", "Rest-Field helps", hotwords="restfield") == 0.0
+    assert qa.script_diff("Restfield helps", "re stf ield helps", hotwords="Restfield") == 0.0
+
+
+def test_without_hotwords_a_split_name_is_still_an_error():
+    assert qa.script_diff("Restfield helps", "rest field helps") > 0.3
+    assert qa.script_diff("Restfield helps", "rest field helps", hotwords=None) > 0.3
+    assert qa.script_diff("Restfield helps", "rest field helps", hotwords="Calmora") > 0.3      # another name does not join it
+
+
+def test_hotword_joining_does_not_hide_real_errors():
+    assert qa.script_diff("Restfield helps you sleep", "rest field helps you", hotwords="Restfield") == 0.25
+    assert qa.script_diff("Restfield helps", "rest helps", hotwords="Restfield") == 0.5
+
+
+def test_hotwords_are_a_comma_list_and_a_phrase_joins_too():
+    assert qa.script_diff("Restfield helps", "rest field helps", hotwords="Calmora, Restfield") == 0.0
+    assert qa.script_diff("Try Restfield", "try rest field", hotwords="Calmora, Restfield\nOther") == 0.0

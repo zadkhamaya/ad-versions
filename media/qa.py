@@ -178,9 +178,33 @@ def _edit_matrix(ref, hyp):
     return d
 
 
-def script_diff(script, transcript):
-    """Word error rate of `transcript` against `script` (Levenshtein over lowercased words without punctuation), 0..1."""
+def _join_hotwords(tokens, hotwords):
+    """A run of tokens whose letters, joined, spell a hotword becomes that one word ("rest field" -> "restfield" for the brand
+    Restfield): a transcriber splits a made-up name. `hotwords` is a comma or line separated list; case and non-letters do not count."""
+    keys = {re.sub(r"[^a-z]", "", h.lower()) for h in re.split(r"[,\n]", hotwords or "")} - {""}
+    if not keys:
+        return tokens
+    letters = [re.sub(r"[^a-z]", "", t) for t in tokens]
+    out, i = [], 0
+    while i < len(tokens):
+        for j in range(len(tokens), i, -1):                 # the longest run first
+            joined = "".join(letters[i:j])
+            if joined in keys and (j - i > 1 or tokens[i] != joined):
+                out.append(joined)
+                i = j
+                break
+        else:
+            out.append(tokens[i])
+            i += 1
+    return out
+
+
+def script_diff(script, transcript, hotwords=None):
+    """Word error rate of `transcript` against `script` (Levenshtein over lowercased words without punctuation), 0..1. With
+    `hotwords`, a run of words that spells one of them counts as that one word, in both texts, before the rate is computed."""
     ref, hyp = _words(script), _words(transcript)
+    if hotwords:
+        ref, hyp = _join_hotwords(ref, hotwords), _join_hotwords(hyp, hotwords)
     if not ref:
         return 0.0 if not hyp else 1.0
     return min(1.0, _edit_matrix(ref, hyp)[-1][-1] / len(ref))

@@ -516,6 +516,15 @@ def test_the_voice_model_and_params_are_part_of_the_cache_key(env, monkeypatch):
     assert len(env["speak"]) == 2
 
 
+def test_the_voice_model_is_part_of_the_cache_key(env, monkeypatch):
+    _stub_pipeline(env, monkeypatch)
+    c = env["client"]
+    assert c.post("/render", json=body("H1_6S_1X1")).status_code == 200
+    monkeypatch.setattr(voice, "MODEL", "dots-tts")                  # an old entry made by another model is not reused
+    assert c.post("/render", json=body("H1_6S_16X9")).status_code == 200
+    assert len(env["speak"]) == 2
+
+
 # ---- the other endpoints ----
 
 def test_frames_forms(env):
@@ -1293,6 +1302,14 @@ def test_transcribe_passes_hotwords_to_the_model_call_and_never_the_script(env, 
     c.post("/transcribe", json={"file": "runs/r1/source.mp4", "script": "Sleep better tonight."})
     assert got["hotwords"] is None                                  # the script is not a hint: the check must stay independent
     assert c.post("/transcribe", json={"file": "runs/r1/source.mp4", "hotwords": ""}).status_code == 422
+
+
+def test_transcribe_counts_a_split_brand_as_one_word_only_with_hotwords(env, monkeypatch):
+    monkeypatch.setattr(whisper, "text", lambda p, hotwords=None: "Rest Field helps you sleep")
+    c = env["client"]
+    j = {"file": "runs/r1/source.mp4", "script": "Restfield helps you sleep."}
+    assert c.post("/transcribe", json={**j, "hotwords": "Restfield"}).json()["wer"] == 0.0
+    assert c.post("/transcribe", json=j).json()["wer"] > 0.0
     assert c.post("/transcribe", json={"file": "runs/r1/source.mp4", "hotwords": "x" * 301}).status_code == 422
 
 

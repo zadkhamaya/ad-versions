@@ -44,3 +44,10 @@ def test_every_endpoint_is_in_the_api_doc():
     paths = {r.path for r in server.app.routes if r.path.startswith("/") and r.path not in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect")}
     assert {"/render", "/check", "/transcribe", "/frames", "/sheet", "/package", "/rulebook", "/edit", "/lint", "/health", "/run"} <= paths
     assert [p for p in paths if f"/{p.lstrip('/')}" not in doc] == []
+
+
+def test_the_render_body_passes_the_brand_logo():
+    import json
+    wf = json.loads((ROOT / "n8n" / "workflow.json").read_text())
+    plan = next(n for n in wf["nodes"] if n["name"] == "Render: plan")
+    assert "music: 'brand/music.m4a', logo: 'brand/logo.png'" in plan["parameters"]["jsCode"]

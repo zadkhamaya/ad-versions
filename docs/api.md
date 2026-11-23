@@ -47,7 +47,18 @@ see "Crop position" below), `broll` (`{"slot1": {"wide": path, "tall": path}}`; 
 `vo_text` (the approved voice-over script, also what the captions show), `disclaimer` (burned into the end card), `music`,
 optional `logo` and `brand`, and optional `voice`: `"runpod"` (default, the RunPod voice job) or `"stub"` (a stand-in for dry
 runs: ffmpeg's `flite` filter reads the script, 48 kHz mono; needs no RunPod or R2 environment; Whisper hears it word for word).
-The voice cache key includes the mode, so a stub voice is never reused for a real run (or the other way round).
+The voice cache key includes the mode, the model and its params, so a stub voice is never reused for a real run (or the other way
+round), nor a voice made by another model.
+
+**The real voice is VoxCPM2** (the voice endpoint in `VOICE_EN_ENDPOINT` serves it; a speak job with another model name fails). The job
+is `model: "voxcpm2"` with exactly `{"seed": 42, "cfg_value": 1.6, "inference_timesteps": 10}`: the worker takes those three
+(seed int, cfg_value 1.0 to 3.0, inference_timesteps 1 to 50) and refuses an unknown param. The script is cleaned before the job,
+because VoxCPM2 silently skips words inside brackets anywhere in a line and reads a leading `(...)` as a style note (it speaks that
+note aloud when it clones from a sample): a leading round or full-width bracket pair is dropped with its contents; any other pair
+becomes commas around its words (`Sleep (really) better` is spoken `Sleep, really, better`); stray brackets are removed; spaces are
+collapsed. `vo_text` itself (the captions, the transcript check) is not changed. A script that is empty after this fails the version.
+`logo` is optional (a PNG; the brand name is drawn as text without it): the workflow passes `brand/logo.png`, the Restfield wordmark
+made by `brand/make-logo.sh`.
 
 ```json
 {"run_id": "r1", "version": "H1_15S_9X16", "source": "runs/r1/source.mp4",
@@ -131,7 +142,9 @@ Each failing check adds one short reason (length, size, frame rate, pixel format
 Whisper transcript of an audio or video file, and the banned words found in it (the rulebook's list). With `script` (the
 approved voice-over text) it is the final-audio check; `version` is optional and only checked for validity. Optional `hotwords` (1 to
 300 characters): names the model should expect (brand, product), handed to faster-whisper's `hotwords`. Never put the script
-there: the check must stay independent of what it checks.
+there: the check must stay independent of what it checks. With hotwords, a run of transcript words whose letters, joined, spell a
+hotword (comma or line separated list, case and punctuation ignored) counts as that one word before the word error rate is
+computed ("rest field helps" against "Restfield helps" gives 0): Whisper splits a made-up name. Without hotwords it stays an error.
 
 ```json
 {"file": "runs/r1/renders/H1_15S_9X16.mp4", "script": "Sleep better tonight.", "version": "H1_15S_9X16"}
@@ -180,7 +193,7 @@ below.
 
 ```json
 {"run_id": "r1", "upload": false,
- "run": {"brand": "BRAND", "campaign": "SleepLaunch", "started_at": "2026-11-22T01:00:00Z", "finished_at": "2026-11-22T01:45:00Z",
+ "run": {"brand": "Restfield", "campaign": "SleepLaunch", "started_at": "2026-11-22T01:00:00Z", "finished_at": "2026-11-22T01:45:00Z",
          "gpu_minutes": 30, "gpu_rate_usd_h": 0.8, "voice_usd": 0.1, "llm_usd": 0.1,
          "disclaimer": "A clinician assesses every request.", "link": "https://example.com", "cta": "Learn More"},
  "approved": [{"version": "H1_6S_1X1", "file": "runs/r1/renders/H1_6S_1X1.mp4", "hook_text": "...", "script": "...", "v": 1,
@@ -188,7 +201,7 @@ below.
  "rejected": [{"version": "H1_30S_16X9", "note": "voice clipped the last word"}]}
 ```
 
-Answer: `{"folder": "runs/r1/package", "files": ["BRAND_SLEEPLAUNCH_H1_6S_1X1_EN_V01.mp4"], "report": {"assets": 1, "cost_per_asset_usd": 0.3, "turnaround_min": 45}, "link": "https://..."}`
+Answer: `{"folder": "runs/r1/package", "files": ["RESTFIELD_SLEEPLAUNCH_H1_6S_1X1_EN_V01.mp4"], "report": {"assets": 1, "cost_per_asset_usd": 0.3, "turnaround_min": 45}, "link": "https://..."}`
 (`link` only with `upload`). Both timestamps need a time zone and `finished_at` must not be before `started_at`. A second
 `/package` for the same run while one is building or uploading is a 409 (the lock is held through the upload).
 

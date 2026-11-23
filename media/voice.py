@@ -1,4 +1,4 @@
-"""voice.py — the voice-over: one speak job on the existing voice-en RunPod endpoint (dots.tts), wav through R2.
+"""voice.py — the voice-over: one speak job on the existing voice-en RunPod endpoint (VoxCPM2), wav through R2.
 
 The job input and the /status shapes are the voice worker's contract. A whole-job failure is `FAILED` with a top-level
 `error`; a job still IN_QUEUE after 10 minutes means the endpoint did not wake (spec §12). The RunPod client and R2
@@ -13,8 +13,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-MODEL = "dots-tts"
-PARAMS = {"seed": 42, "num_steps": 10, "guidance_scale": 1.2}      # fixed: part of the server's voice-cache key
+MODEL = "voxcpm2"
+# The worker's contract for voxcpm2: exactly these three (seed int, cfg_value float 1.0-3.0, inference_timesteps int 1-50);
+# an unknown param is refused. Fixed, and part of the server's voice-cache key (with MODEL), so older entries are not reused.
+PARAMS = {"seed": 42, "cfg_value": 1.6, "inference_timesteps": 10}
 USER_AGENT = "ad-versions/0.1 (voice)"
 JOB_TTL_S = 1800            # RunPod drops the job after this long
 WAKE_WAIT_S = 600           # IN_QUEUE longer than this: the endpoint did not wake
@@ -26,6 +28,33 @@ _MAX_ANSWER = 5 * 1024 * 1024
 
 class VoiceError(Exception):
     pass
+
+
+_LEAD_NOTE = re.compile(r"^\s*[(\uff08][^()\uff08\uff09\[\]\uff3b\uff3d]*[)\uff09]")
+_PAIR = re.compile(r"[(\uff08\[\uff3b]([^()\uff08\uff09\[\]\uff3b\uff3d]*)[)\uff09\]\uff3d]")
+_STRAY = re.compile(r"[()\uff08\uff09\[\]\uff3b\uff3d]")
+
+
+def clean_text(text):
+    """What VoxCPM2 may be given. It silently skips words inside brackets anywhere in a line and reads a leading "(...)" as a style
+    note (cloning from a sample, it speaks the note aloud). So: a leading round or full-width pair goes, with its contents; any other
+    pair becomes commas around its words (they are read, with a pause); a stray bracket is removed; spaces are collapsed."""
+    while True:
+        t = _LEAD_NOTE.sub("", text, count=1)
+        if t == text:
+            break
+        text = t
+    while True:
+        t = _PAIR.sub(lambda m: f", {m.group(1)}, ", text)
+        if t == text:
+            break
+        text = t
+    text = _STRAY.sub("", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"\s+,", ",", text)
+    text = re.sub(r",(?:\s*,)+", ",", text)                # commas that met
+    text = re.sub(r",\s*([.!?;:])", r"\1", text)           # a comma never sits before the sentence's own punctuation
+    return text.strip().lstrip(",").rstrip(",").strip()
 
 
 class TransientError(VoiceError):
@@ -185,6 +214,9 @@ def speak(text, out_wav, *, sample_get, transcript, run, version, runpod=None, r
     runpod = runpod or runpod_from_env()
     r2 = r2 or r2_from_env()
     endpoint = endpoint or _env("VOICE_EN_ENDPOINT")[0]
+    text = clean_text(text)
+    if not text:
+        raise VoiceError("the voice-over text is empty")
     key = f"runs/{run}/vo/{version}"
     job_input = {"op": "speak", "model": MODEL,
                  "voice": {"sample_get": sample_get, "transcript": transcript, "lang": "en"},

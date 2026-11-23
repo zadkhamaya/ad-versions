@@ -45,3 +45,7 @@ def test_a_symbol_phrase_matches_inside_a_number():
     assert hard_hits("only $49 a month", RB) == ["$"]
     assert hard_hits("US$49", RB) == ["$"]
     assert hard_hits("49 dollars", RB) == []
+
+
+def test_the_brand_is_restfield():
+    assert RB.brand == "Restfield"

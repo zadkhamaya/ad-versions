@@ -611,7 +611,7 @@ def transcribe(req: TranscribeIn):
         text = whisper.text(str(path), hotwords=req.hotwords) if req.hotwords else whisper.text(str(path))
     out = {"text": text, "banned": rulebook.hard_hits(text, _rulebook())}
     if req.script is not None:
-        wer = qa.script_diff(req.script, text)
+        wer = qa.script_diff(req.script, text, hotwords=req.hotwords)
         reasons = []
         if wer > qa.MAX_WER:
             reasons.append(f"voice-over differs from the script (word error rate {wer:.2f}, over {qa.MAX_WER:g})")

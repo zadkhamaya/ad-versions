@@ -76,9 +76,9 @@ def test_speak_job_shape_and_wav(tmp_path):
     endpoint, job, _ttl = rp.jobs[0]
     assert endpoint == "ep1"
     assert set(job) == {"op", "model", "voice", "params", "rows"}
-    assert job["op"] == "speak" and job["model"] == "dots-tts"
+    assert job["op"] == "speak" and job["model"] == "voxcpm2"
     assert job["voice"] == {"sample_get": "https://r2.test/get/sample.wav", "transcript": "a sample", "lang": "en"}
-    assert job["params"] == {"seed": 42, "num_steps": 10, "guidance_scale": 1.2}
+    assert job["params"] == {"seed": 42, "cfg_value": 1.6, "inference_timesteps": 10}
     assert job["rows"] == [{"id": "vo", "text": "Sleep better tonight.", "out": {
         "wav": "https://r2.test/put/runs/run1/vo/H1_15S_9X16.wav", "json": "https://r2.test/put/runs/run1/vo/H1_15S_9X16.json"}}]
     assert rp.polls == 2
@@ -239,3 +239,39 @@ def test_speak_reports_the_execution_time(tmp_path):
     call(tmp_path, FakeRunPod([{**done, "executionTime": None}]), info=info)
     assert info == {}                                              # absent: nothing invented
     call(tmp_path, FakeRunPod([done]))                             # info is optional
+
+
+# ---- the text VoxCPM2 is given: brackets ----
+
+@pytest.mark.parametrize("text,want", [
+    ("(softly) Sleep better tonight.", "Sleep better tonight."),                       # a leading style note is dropped with its words
+    ("\uff08softly\uff09 Sleep better tonight.", "Sleep better tonight."),               # full-width pair too
+    ("  (softly)Sleep better tonight.", "Sleep better tonight."),
+    ("Sleep (really) better tonight.", "Sleep, really, better tonight."),                # any other pair: commas around its words
+    ("Sleep better (tonight)", "Sleep better, tonight"),
+    ("Sleep better [tonight] and \uff08soon\uff09.", "Sleep better, tonight, and, soon."),
+    ("Sleep ) better ( tonight .", "Sleep better tonight ."),                          # stray brackets removed, spaces collapsed
+    ("Sleep   better\n tonight.", "Sleep better tonight."),
+    ("Sleep better tonight.", "Sleep better tonight."),
+])
+def test_text_for_voxcpm2_handles_brackets(text, want):
+    assert voice.clean_text(text) == want
+
+
+def test_the_job_carries_the_cleaned_text(tmp_path):
+    rp = FakeRunPod([{"status": "COMPLETED", "output": {"rows": [{"id": "vo", "ok": True, "seed": 42, "duration_s": 1.5, "generate_s": 0.7}]}}])
+    speak("(softly) Sleep (really) better.", tmp_path / "vo.wav", sample_get="https://r2.test/get/sample.wav", transcript="a sample",
+          run="run1", version="V", runpod=rp, r2=FakeR2(), endpoint="ep1", clock=Clock().now, sleep=lambda s: None)
+    assert rp.jobs[0][1]["rows"][0]["text"] == "Sleep, really, better."
+
+
+def test_params_are_exactly_the_three_voxcpm2_ones():
+    assert voice.MODEL == "voxcpm2"
+    assert set(voice.PARAMS) == {"seed", "cfg_value", "inference_timesteps"}
+
+
+def test_a_text_that_is_only_a_style_note_is_refused(tmp_path):
+    rp = FakeRunPod([])
+    with pytest.raises(VoiceError, match="empty"):
+        speak("(softly)", tmp_path / "vo.wav", sample_get="x", transcript="t", run="r", version="V", runpod=rp, r2=FakeR2(), endpoint="ep1")
+    assert rp.jobs == []
