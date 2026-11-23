@@ -1,10 +1,10 @@
-# The n8n workflow (first half: brief to b-roll)
+# The n8n workflow (brief to package, dry run)
 
 Two exported workflows, credentials stripped (names kept):
 
 | File | Workflow | What it does |
 |---|---|---|
-| `workflow.json` | **ad-versions** | brief form → source clip → beats → scripts → compliance → look line → b-roll (dry run). Stops at the no-op `→ 12b: render`; rendering, QA, approval and handover come next. |
+| `workflow.json` | **ad-versions** | brief form → source clip → beats → scripts → compliance → look line → b-roll (dry run) → render the 18 versions → QA → contact sheet → approval form → package. |
 | `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time) and stops; a failure in the trigger itself has no execution id, so its folder is `trigger-<timestamp>`. Telegram and pod clean-up come with the live b-roll. |
 
 Built and tested on n8n **2.46.6** (the tag pinned in `docker/.env`).
@@ -46,8 +46,54 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    compliance pass dropped a shot. The **live** branch (toolkit pods and `/api/broll`) is a disabled stub node plus a
    Stop and Error: the toolkit side is not deployed yet, so a run with Dry run unticked stops there on purpose.
 8. **Run data**: `runs/<id>/run.json` holds the whole run so far (brief, beats, reframe, rulebook, scripts, compliance,
-   look, b-roll, LLM cost). **Run: state for 12b** hands that same object (no binary) to **→ 12b: render**, where
-   rendering attaches; **Run: summary** is a short side view for reading an execution.
+   look, b-roll, LLM cost). **Run: state for 12b** hands that same object (no binary) to the second half (below);
+   **Run: summary** is a short side view for reading an execution.
+
+### Second half: render, QA, approval, package
+
+9. **Render: plan** lists the versions in `naming.matrix()` order (H1/H2 × 6/15/30 × 9X16/1X1/16X9). A version whose
+   hook or length line the compliance pass dropped is **not made**, with the reason. **Render: loop** feeds one version at
+   a time through the steps below (an HTTP Request node with several items fires them all at once, and the media service
+   renders one at a time, so the loop is what keeps each request inside its timeout).
+10. **Render: POST /render** (timeout 20 min): `source`, `beats`, the hook's `slots` as `broll` (left out for 6 s, which has
+    no cutaway), `vo_text` = the line, the rulebook's disclaimer and brand, `music` = `brand/music.m4a`, and
+    `voice` = `"stub"` in a dry run, `"runpod"` otherwise. An error answer (4xx, 5xx, a timeout) makes that version
+    **failed** with the service's message; the loop goes on.
+11. **QA** per rendered version: `POST /check`; `POST /transcribe` with the line as `script` (WER, banned words);
+    `POST /frames` `at: "last"` → the vision model reads the end card's disclaimer back → compared with the
+    rulebook's text ignoring case, spacing and punctuation. **QA: merge** builds `{passed, reasons}` as docs/api.md
+    "How `qa` is merged": the render log's reasons, `/check`, `/transcribe`, and the disclaimer read. A QA call that fails
+    to run counts as a reason (a version that could not be checked does not pass).
+12. **Sheet** (`POST /sheet`, all rendered files in matrix order → `runs/<id>/sheet.jpg`) and **Approval: build**: the
+    summary line (`18 versions: 17 passed, 1 failed (H2_6S_1X1: loudness ...)`) and a table of every version with its QA.
+13. **Approval: form** is a Wait node resumed by a form (no Telegram bot yet; the form-waiting path is public by design,
+    its URL carries a signature). One checkbox per version, the ones that passed pre-ticked, and a notes box (one note
+    per line, `H2_6S_1X1: voice clipped`; other lines are a general note). Wait limit 7 days. The form's URL is in
+    `run.json` → `approval.form_url` (written before the wait), and a reviewer, or a script, posts it as multipart:
+    `field-0` repeated per ticked version, `field-1` the notes. A tick on a version that was never rendered is ignored.
+    The form lists all 18 versions as static options because n8n validates the Wait node's field list when the workflow
+    is published, so it cannot be built per run; the table above it says which were not made.
+14. **Package: body** → **POST /package**: approved items (`file`, `version`, `hook_text` = the hook's 6 s line,
+    `script`, `length_s`, `fmt`, `synthetic_media`, `qa`, approver `reviewer`, approval time = the form's submission time),
+    rejected items with the reviewer's note and why (QA reasons, not made), and `run` = brand (the rulebook's),
+    campaign (the brief's product), `started_at` (the brief's submission), `finished_at` (now), GPU 0, voice 0 and
+    `llm_usd` = the first half's plus this half's vision calls. `upload` is false in a dry run: the media service has no R2
+    environment yet. A live run sends `true`, and `/package` then fails clearly if R2 is not configured. Nothing approved
+    = no package. The answer (folder, files, report numbers) is written to `run.json` → `package`, then **Run: done**.
+
+Two **disabled** Telegram nodes (a photo with the summary, then Send and Wait with *Approve passed* / *Review*) sit
+unconnected under the approval step. They replace the form once the `telegram-demo` credential and a chat id exist:
+connect the sheet to the photo, the photo to Send and Wait, and send *Review* on to the form.
+
+### The dry-run voice and the music placeholder
+
+`/render` takes `voice: "stub"`: ffmpeg's `flite` voice reads the script (no RunPod, no R2). Whisper transcribes it
+well but not perfectly, so a short line with an unusual word can miss the 0.15 WER gate: that is the QA doing its job on
+a stand-in voice, not a workflow fault.
+
+There is no music bed yet. `n8n/fixtures/make-music.sh <out.m4a>` makes a quiet 35 s placeholder pad; put it at
+`brand/music.m4a` under the data root (on the box `~/.ad-versions/data/brand/music.m4a`) until the real bed exists. No
+logo is needed: the end card draws the brand name.
 
 ### What the run state holds (what 12b receives)
 
@@ -72,7 +118,7 @@ and not in `slots`.
 |---|---|---|
 | `Nous` | OpenAI API, Base URL `https://inference-api.nousresearch.com/v1` | every LLM and vision node (HTTP Request nodes using the credential's key; the URL is in the node). Model `google/gemini-4-argon`. |
 | `brief-form` | Basic Auth (user `brief`) | the Brief form's login. Without it the form answers 401. |
-| `telegram-demo` | Telegram | later (approval and handover messages) |
+| `telegram-demo` | Telegram | later: the disabled approval nodes, and the failure message in the error workflow |
 | R2 | | not in n8n: it is in the media service's env |
 
 The LLM nodes are HTTP Request nodes, not the OpenAI nodes: with a custom base URL they let the body carry
@@ -82,7 +128,8 @@ The LLM nodes are HTTP Request nodes, not the OpenAI nodes: with a custom base U
 ## Dry run
 
 The form's **Dry run** checkbox is ticked by default. Ticked (or the field missing from a post) = stand-in b-roll, no
-GPU, no spend. Unticked (`[]`) = the live branch, which for now stops with an error.
+GPU, no spend. Unticked (`[]`) = the live branch, which for now stops with an error. A dry run also uses the stub voice and builds the
+package without uploading it.
 
 ## Beats syntax
 
@@ -144,7 +191,7 @@ curl -u brief:$PASSWORD http://127.0.0.1:5678/form/brief \
   --form-string "field-10=$BEATS" --form-string 'field-12=["Dry run: stand-in b-roll, no GPU"]'
 ```
 
-## Not built yet (12b and later)
+## Not built yet
 
-Rendering the 18 versions, QA, the contact sheet and Telegram approval, the handover package, the live b-roll branch,
-pod clean-up and the Telegram message in the error workflow.
+The live b-roll branch (pods and `/api/broll`), live GPU and voice costs in the report, the Telegram approval, pod clean-up
+and the Telegram message in the error workflow.
