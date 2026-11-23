@@ -923,6 +923,16 @@ def test_transcribe_with_a_script_returns_the_final_audio_verdict(env, monkeypat
     assert c.post("/transcribe", json={"file": "runs/r1/source.mp4", "script": ""}).status_code == 422
 
 
+def test_run_endpoint_creates_the_run_folder(env):
+    c = env["client"]
+    r = c.post("/run", json={"run_id": "n8n-42"})
+    assert r.status_code == 200 and r.json() == {"folder": "runs/n8n-42"}
+    assert (env["root"] / "runs" / "n8n-42" / "broll").is_dir()
+    assert c.post("/run", json={"run_id": "n8n-42"}).status_code == 200            # repeating is fine
+    for bad in ("../x", "a/b", "", "x" * 65):
+        assert c.post("/run", json={"run_id": bad}).status_code == 422
+
+
 def test_rulebook_edit_and_lint_endpoints(env):
     c = env["client"]
     rb = c.get("/rulebook").json()

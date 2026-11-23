@@ -599,6 +599,19 @@ def transcribe(req: TranscribeIn):
     return out
 
 
+class RunIn(BaseModel):
+    run_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+
+
+@app.post("/run")
+def make_run(req: RunIn):
+    """Create runs/<run_id>/ (and broll/) if they are not there: n8n's file nodes write into an existing folder only, so the
+    first node of a run asks for it here. Safe to repeat."""
+    run_dir = data_root() / "runs" / req.run_id
+    (run_dir / "broll").mkdir(parents=True, exist_ok=True)
+    return {"folder": f"runs/{req.run_id}"}
+
+
 @app.get("/rulebook")
 def get_rulebook():
     return dataclasses.asdict(_rulebook())

@@ -190,6 +190,17 @@ Answer: `{"folder": "runs/r1/package", "files": ["BRAND_SLEEPLAUNCH_H1_6S_1X1_EN
 2. `/check`'s `reasons` (a `passed: false` with no reason is not possible: every failing check adds one),
 3. `/transcribe`'s `reasons` for the final-audio check (when it ran with `script`).
 
+## POST /run
+
+Creates `runs/<run_id>/` and `runs/<run_id>/broll/` (safe to repeat). n8n's file nodes write only into a folder that already
+exists, so the first step of a run asks for it here before the source clip is written.
+
+```json
+{"run_id": "r1"}
+```
+
+Answer: `{"folder": "runs/r1"}`. A `run_id` outside letters, digits, `-`, `_` (1 to 64 characters) is a 422.
+
 ## GET /rulebook, GET /edit, POST /lint
 
 - `GET /rulebook` returns the brand rulebook: `brand`, `disclaimer`, `claims`, `shots`, `banned_words`, `banned_media`,

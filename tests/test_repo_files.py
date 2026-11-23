@@ -42,5 +42,5 @@ def test_every_endpoint_is_in_the_api_doc():
     from media import server
     doc = (ROOT / "docs" / "api.md").read_text()
     paths = {r.path for r in server.app.routes if r.path.startswith("/") and r.path not in ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect")}
-    assert {"/render", "/check", "/transcribe", "/frames", "/sheet", "/package", "/rulebook", "/edit", "/lint", "/health"} <= paths
+    assert {"/render", "/check", "/transcribe", "/frames", "/sheet", "/package", "/rulebook", "/edit", "/lint", "/health", "/run"} <= paths
     assert [p for p in paths if f"/{p.lstrip('/')}" not in doc] == []
