@@ -22,9 +22,11 @@ def words(wav) -> list[dict]:
             for seg in segments for w in (seg.words or []) if w.word.strip()]
 
 
-def text(path) -> str:
-    """The transcript of an audio or video file as one line."""
-    segments, _info = _get().transcribe(str(path), language="en")
+def text(path, hotwords=None) -> str:
+    """The transcript of an audio or video file as one line. `hotwords`: words the model should expect (names), faster-whisper's own
+    hint; never the script the transcript is compared with."""
+    kw = {"hotwords": hotwords} if hotwords else {}
+    segments, _info = _get().transcribe(str(path), language="en", **kw)
     return " ".join(seg.text.strip() for seg in segments if seg.text.strip())
 
 

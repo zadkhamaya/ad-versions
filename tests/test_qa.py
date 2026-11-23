@@ -265,3 +265,30 @@ def test_contraction_matrix_is_zero_both_ways(script, heard):
 ])
 def test_contraction_real_errors_still_fail(script, heard):
     assert qa.script_diff(script, heard) > 0.15 and qa.script_diff(heard, script) > 0.15
+
+
+def _px(jpg, x, y):
+    r = subprocess.run(["ffmpeg", "-v", "error", "-i", str(jpg), "-vf", f"crop=1:1:{x}:{y}", "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                       capture_output=True, check=True)
+    return tuple(r.stdout)
+
+
+def test_sheet_marks_pass_green_and_fail_red_on_the_cell_edge(media, tmp_path):
+    files = []
+    for n in (1, 2, 3):
+        p = tmp_path / f"V{n}.mp4"
+        ff("-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=24:duration=3", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(p))
+        files.append(str(p))
+    files.append(str(tmp_path / "missing.mp4"))                       # a failed render: the placeholder carries its mark too
+    out = tmp_path / "sheet.jpg"
+    sheet.make(files, str(out), status=["pass", "fail", None, "fail"])
+    edge = lambda col: _px(out, col * 320 + 2, 160)
+    r, g, b = edge(0); assert g > 140 and r < 110 and b < 110          # pass: green
+    r, g, b = edge(1); assert r > 140 and g < 110 and b < 110          # fail: red
+    r, g, b = edge(3); assert r > 140 and g < 110 and b < 110          # the placeholder cell too
+    assert not (edge(2)[1] > 140 and edge(2)[0] < 110)                  # unmarked: no outline
+
+
+def test_sheet_status_must_match_the_files(tmp_path):
+    with pytest.raises(ValueError):
+        sheet.make(["a.mp4", "b.mp4"], str(tmp_path / "s.jpg"), status=["pass"])

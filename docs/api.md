@@ -129,7 +129,9 @@ Each failing check adds one short reason (length, size, frame rate, pixel format
 ## POST /transcribe
 
 Whisper transcript of an audio or video file, and the banned words found in it (the rulebook's list). With `script` (the
-approved voice-over text) it is the final-audio check; `version` is optional and only checked for validity.
+approved voice-over text) it is the final-audio check; `version` is optional and only checked for validity. Optional `hotwords` (1 to
+300 characters): names the model should expect (brand, product), handed to faster-whisper's `hotwords`. Never put the script
+there: the check must stay independent of what it checks.
 
 ```json
 {"file": "runs/r1/renders/H1_15S_9X16.mp4", "script": "Sleep better tonight.", "version": "H1_15S_9X16"}
@@ -153,7 +155,8 @@ two clips with the same name in different folders do not overwrite each other.
 ## POST /sheet
 
 A contact sheet (6 x 3 JPEG, one frame per file, labelled with the file name) of up to 18 files. A file that is missing or
-unreadable (a failed render) gets a "no frame" cell instead of failing the sheet.
+unreadable (a failed render) gets a "no frame" cell instead of failing the sheet. Optional `status`: one entry per file,
+`"pass"`, `"fail"` or `null`; a marked cell gets a green or red outline and a PASS or FAIL badge (a "no frame" cell too).
 
 ```json
 {"files": ["runs/r1/renders/H1_6S_1X1.mp4", "runs/r1/renders/H1_15S_9X16.mp4"], "out": "runs/r1/sheet.jpg"}
@@ -167,7 +170,12 @@ Builds the handover package from the approved versions and, with `upload` true (
 7-day link. `upload: false` builds the folder only (the dry run). Each approved item's `file` must be
 `runs/<run_id>/renders/<version>.mp4` (its name must equal its `version`). `v` (1 to 99, default 1) is the V number in the
 renamed file; n8n raises it when the same name is rendered again. `run.disclaimer` is the text burned into the end card and
-goes into the manifest; when absent the rulebook's is used. `qa` per approved version is `{"passed", "reasons"}` as merged
+goes into the manifest; when absent the rulebook's is used. Optional `run` fields for the report: `mode` (one line: what was
+stand-in, or "live"), `review_ready_at` (tz-aware, between the two times: when the run reached its review; gives the "machine time to
+review-ready" line next to the total), `review_note` (the reviewer's general note), and `link` / `cta` for the Meta CSV. An
+approved item may carry `note` (the reviewer's note: on a version that failed QA it is the reason it was approved anyway, and the
+report prints "approved over QA: <reasons> — <note>"). The report shows its times in Asia/Jakarta (+07:00) and the cost per asset
+with three decimals below a cent; the JSON keeps four (`cost_per_asset_usd`, plus `machine_min` when given). `qa` per approved version is `{"passed", "reasons"}` as merged
 below.
 
 ```json
@@ -190,7 +198,11 @@ Answer: `{"folder": "runs/r1/package", "files": ["BRAND_SLEEPLAUNCH_H1_6S_1X1_EN
 
 1. the `/render` log's `reasons`,
 2. `/check`'s `reasons` (a `passed: false` with no reason is not possible: every failing check adds one),
-3. `/transcribe`'s `reasons` for the final-audio check (when it ran with `script`).
+3. `/transcribe`'s `reasons` for the final-audio check (when it ran with `script`),
+4. n8n's own check of the end card: the disclaimer read back from the last frame (`/frames` `at: "last"` and a vision model) compared with the
+   rulebook's text, ignoring case, spacing and punctuation.
+
+A version that fails with no reason of its own is given one (n8n adds "QA failed with no reason given"), so a failure is never silent.
 
 ## POST /run
 

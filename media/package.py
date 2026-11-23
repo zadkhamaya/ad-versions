@@ -9,7 +9,7 @@ import os
 import re
 import shutil
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -58,15 +58,50 @@ def turnaround_min(run: dict) -> float:
     return (end - start).total_seconds() / 60
 
 
+JAKARTA = timezone(timedelta(hours=7))       # the report shows every time in one zone (Asia/Jakarta has no DST)
+
+
+def _aware(run: dict, key: str) -> datetime:
+    t = datetime.fromisoformat(run[key])
+    if t.utcoffset() is None:
+        raise ValueError(f"{key} needs a time zone (e.g. 2026-11-22T01:00:00Z)")
+    return t
+
+
+def machine_min(run: dict):
+    """Minutes from started_at to review_ready_at (when the run waited for review), or None; it must lie between the two other times."""
+    if not run.get("review_ready_at"):
+        return None
+    start, ready, end = _aware(run, "started_at"), _aware(run, "review_ready_at"), _aware(run, "finished_at")
+    if not start <= ready <= end:
+        raise ValueError("review_ready_at must lie between started_at and finished_at")
+    return (ready - start).total_seconds() / 60
+
+
+def _jakarta(iso: str) -> str:
+    return datetime.fromisoformat(iso).astimezone(JAKARTA).isoformat(timespec="seconds")
+
+
+def _money(x: float) -> str:
+    """A cost per asset: cents from a cent up, three decimals below that, '< $0.001' for a tiny one, '$0.00' for none."""
+    if x >= 0.01 or x == 0:
+        return f"${x:.2f}"
+    return f"${x:.3f}" if x >= 0.001 else "< $0.001"
+
+
 def _one_line(text) -> str:
     """User text for report.md: one line, no markup."""
     return re.sub(r"\s+", " ", str(text)).strip().replace("<", "&lt;")
 
 
-def _qa_line(qa) -> str:
+def _qa_line(qa, note="") -> str:
+    """QA of an approved file: a pass (with the reviewer's note if there is one), or what it failed on and why it was approved anyway."""
+    note = _one_line(note) if note else ""
     if not qa:
-        return "no QA result"
-    return "passed" if qa.get("passed") else "failed: " + _one_line("; ".join(qa.get("reasons") or ["no reason given"]))
+        return "no QA result" + (f"; note: {note}" if note else "")
+    if qa.get("passed"):
+        return "passed" + (f"; note: {note}" if note else "")
+    return "approved over QA: " + _one_line("; ".join(qa.get("reasons") or ["no reason given"])) + f" \u2014 {note or 'no note'}"
 
 
 def _index(names: list[str], href=lambda n: n) -> str:
@@ -79,15 +114,21 @@ def _index(names: list[str], href=lambda n: n) -> str:
 
 def _report(run: dict, rows: list[dict], rejected: list[dict], summary: dict) -> str:
     cost = summary["cost_per_asset_usd"]
+    span = f"({_jakarta(run['started_at'])} to {_jakarta(run['finished_at'])})"
+    turn = (f"machine time to review-ready {summary['machine_min']:g} min; total including review {summary['turnaround_min']:g} min {span}"
+            if summary.get("machine_min") is not None else f"{summary['turnaround_min']:g} min {span}")
     out = [f"# Run report: {run['brand']} {run['campaign']}", "",
            f"- Assets per shoot: {summary['assets']}",
-           f"- Cost per asset: {'n/a (nothing approved)' if cost is None else f'${cost:.2f}'}",
-           f"  - {FORMULA}; GPU {run['gpu_minutes']:g} min at ${run['gpu_rate_usd_h']:g}/h, voice-over ${run['voice_usd']:.2f}, LLM ${run['llm_usd']:.2f}",
-           f"- Turnaround: {summary['turnaround_min']:g} min ({run['started_at']} to {run['finished_at']})", "",
-           "## Approved", ""]
-    out += [f"- {r['file']} ({r['version']}), QA {_qa_line(r['qa'])}; approved by {_one_line(r['approver']) or 'n/a'} at {_one_line(r['approved_at']) or 'n/a'}" for r in rows] or ["- none"]
+           f"- Cost per asset: {'n/a (nothing approved)' if cost is None else _money(cost)}",
+           f"  - {FORMULA}; GPU {run['gpu_minutes']:g} min at ${run['gpu_rate_usd_h']:g}/h, voice-over ${run['voice_usd']:.2f}, LLM ${run['llm_usd']:.2f}"]
+    if run.get("mode"):
+        out.append(f"- Mode: {_one_line(run['mode'])}")
+    out += [f"- Turnaround: {turn}", "", "## Approved", ""]
+    out += [f"- {r['file']} ({r['version']}), QA {_qa_line(r['qa'], r.get('note'))}; approved by {_one_line(r['approver']) or 'n/a'} at {_one_line(r['approved_at']) or 'n/a'}" for r in rows] or ["- none"]
     out += ["", "## Rejected", ""]
     out += [f"- {_one_line(x['version'])}: {_one_line(x.get('note') or 'no note')}" for x in rejected] or ["- none"]
+    if run.get("review_note"):
+        out += ["", "## Reviewer note", "", f"- {_one_line(run['review_note'])}"]
     return "\n".join(out) + "\n"
 
 
@@ -102,6 +143,7 @@ def build(run: dict, approved: list[dict], rejected: list[dict], out_dir: Path) 
     if dup:
         raise ValueError(f"duplicate approved version(s): {', '.join(dup)}")
     summary_min = round(turnaround_min(run), 1)
+    ready_min = machine_min(run)
     disclaimer = run.get("disclaimer") or rulebook.load(ROOT / "brand" / "rulebook.yaml").disclaimer   # the one burned into the end card
     lang = run.get("lang", "EN")
     tmp = Path(tempfile.mkdtemp(prefix=f".{out_dir.name}.tmp-", dir=out_dir.parent))
@@ -115,7 +157,7 @@ def build(run: dict, approved: list[dict], rejected: list[dict], out_dir: Path) 
             shutil.copy2(a["file"], tmp / name)
             rows.append({"version": a["version"], "file": name, "hook": a["hook_text"], "script": a["script"], "length_s": length_s,
                          "format": fmt, "placement": PLACEMENTS[fmt], "synthetic_media": "yes", "disclaimer": disclaimer,
-                         "qa": a.get("qa"), "approver": a.get("approver", ""), "approved_at": a.get("approved_at", ""), "_item": a})
+                         "qa": a.get("qa"), "note": a.get("note", ""), "approver": a.get("approver", ""), "approved_at": a.get("approved_at", ""), "_item": a})
 
         cols = _columns()
         with (tmp / "manifest.csv").open("w", encoding="utf-8", newline="") as f:
@@ -128,7 +170,9 @@ def build(run: dict, approved: list[dict], rejected: list[dict], out_dir: Path) 
                         "files": [{k: v for k, v in r.items() if k != "_item"} for r in rows]}, indent=2, ensure_ascii=False) + "\n",
             encoding="utf-8")
         total = run["gpu_minutes"] / 60 * run["gpu_rate_usd_h"] + run["voice_usd"] + run["llm_usd"]
-        summary = {"assets": len(rows), "cost_per_asset_usd": round(total / len(rows), 2) if rows else None, "turnaround_min": summary_min}
+        summary = {"assets": len(rows), "cost_per_asset_usd": round(total / len(rows), 4) if rows else None, "turnaround_min": summary_min}
+        if ready_min is not None:
+            summary["machine_min"] = round(ready_min, 1)
         (tmp / "report.md").write_text(_report(run, rows, rejected, summary), encoding="utf-8")
         (tmp / "index.html").write_text(_index([r["file"] for r in rows] + list(EXTRAS)), encoding="utf-8")
         if out_dir.exists():

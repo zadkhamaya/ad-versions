@@ -40,26 +40,44 @@ def _write(path, text):
     return path
 
 
-def _frame(f, label, out_png):
-    """The 40 % frame of f, letterboxed into a cell with its label, written to out_png."""
+MARKS = {"pass": ("0x2ecc40", "PASS"), "fail": ("0xff3b30", "FAIL")}      # outline colour and badge text
+MARK_PX = 6
+
+
+def _mark(status, tmp, n):
+    """drawbox + badge filters for a cell with a pass/fail mark ("" for none): a coloured outline and PASS/FAIL top left."""
+    if status not in MARKS:
+        return ""
+    colour, word = MARKS[status]
+    badge = _write(os.path.join(tmp, f"mark{n:02d}.txt"), word)
+    return (f",drawbox=x=0:y=0:w=iw:h=ih:color={colour}:t={MARK_PX},"
+            f"drawtext=fontfile={filter_path(FONT)}:textfile={filter_path(badge)}:expansion=none:fontsize=22:fontcolor=white:"
+            f"box=1:boxcolor={colour}:boxborderw=4:x={MARK_PX + 4}:y={MARK_PX + 4}")
+
+
+def _frame(f, label, out_png, mark=""):
+    """The 40 % frame of f, letterboxed into a cell with its label (and a pass/fail mark), written to out_png."""
     vf = (f"scale={CELL_W}:{CELL_H}:force_original_aspect_ratio=decrease,pad={CELL_W}:{CELL_H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,"
-          + _text(label, "box=1:boxcolor=black@0.7:boxborderw=3:text_align=C:x=(w-text_w)/2:y=h-text_h-4"))
+          + _text(label, "box=1:boxcolor=black@0.7:boxborderw=3:text_align=C:x=(w-text_w)/2:y=h-text_h-4") + mark)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{duration(f) * AT:.3f}", "-i", str(f), "-frames:v", "1", "-vf", vf,
                     out_png], check=True, capture_output=True)
     if not os.path.exists(out_png) or os.path.getsize(out_png) == 0:     # ffmpeg can exit 0 with no frame written
         raise RuntimeError("no frame")
 
 
-def _placeholder(label, note, out_png):
+def _placeholder(label, note, out_png, mark=""):
     vf = (_text(note, "fontsize=20:x=(w-text_w)/2:y=(h-text_h)/2") + ","
-          + _text(label, "text_align=C:x=(w-text_w)/2:y=h-text_h-4"))
+          + _text(label, "text_align=C:x=(w-text_w)/2:y=h-text_h-4") + mark)
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c=0x202020:s={CELL_W}x{CELL_H}", "-vf", vf,
                     "-frames:v", "1", out_png], check=True, capture_output=True)
 
 
-def make(files, out_jpg):
+def make(files, out_jpg, status=None):
+    """status: optional, one entry per file: "pass", "fail" or None. A marked cell gets a green or red outline and a PASS/FAIL badge."""
     if not files:
         raise ValueError("no files for the contact sheet")
+    if status is not None and len(status) != len(files):
+        raise ValueError(f"{len(status)} marks for {len(files)} files")
     if len(files) > COLS * ROWS:
         raise ValueError(f"{len(files)} files (a sheet holds {COLS * ROWS})")
     with tempfile.TemporaryDirectory() as tmp:
@@ -67,12 +85,13 @@ def make(files, out_jpg):
         for n, f in enumerate(files, 1):
             label = _write(os.path.join(tmp, f"label{n:02d}.txt"), _wrap(os.path.basename(str(f))))
             png = os.path.join(tmp, f"cell{n:02d}.png")
+            mark = _mark(status[n - 1] if status else None, tmp, n)
             try:
-                _frame(f, label, png)
+                _frame(f, label, png, mark)
             except (subprocess.CalledProcessError, ValueError, RuntimeError):
                 if os.path.exists(png):
                     os.remove(png)
-                _placeholder(label, _write(os.path.join(tmp, f"note{n:02d}.txt"), "no frame"), png)
+                _placeholder(label, _write(os.path.join(tmp, f"note{n:02d}.txt"), "no frame"), png, mark)
             cells.append(png)
         # explicit inputs: every file has a cell, so a gap cannot cut the sequence short
         inputs = [a for c in cells for a in ("-i", c)]

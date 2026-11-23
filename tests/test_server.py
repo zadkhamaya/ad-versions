@@ -1279,3 +1279,28 @@ def test_the_voice_cache_separates_modes(env, monkeypatch):
     assert len(env["speak"]) == 1 and len(list((env["run"] / "vo").glob("*.wav"))) == 2
     r = c.post("/render", json=body("H2_6S_1X1", voice="stub"))                                 # same mode again: cached
     assert r.json()["log"]["vo_cached"] is True and len(list((env["run"] / "vo").glob("*.wav"))) == 2
+
+
+# ---- hotwords, sheet marks ----
+
+def test_transcribe_passes_hotwords_to_the_model_call_and_never_the_script(env, monkeypatch):
+    got = {}
+    monkeypatch.setattr(whisper, "text", lambda p, hotwords=None: got.update(hotwords=hotwords) or "sleep better tonight")
+    c = env["client"]
+    r = c.post("/transcribe", json={"file": "runs/r1/source.mp4", "script": "Sleep better tonight.", "hotwords": "Calmora, Online sleep clinic"})
+    assert r.status_code == 200 and got["hotwords"] == "Calmora, Online sleep clinic"
+    assert r.json()["wer"] == 0.0
+    c.post("/transcribe", json={"file": "runs/r1/source.mp4", "script": "Sleep better tonight."})
+    assert got["hotwords"] is None                                  # the script is not a hint: the check must stay independent
+    assert c.post("/transcribe", json={"file": "runs/r1/source.mp4", "hotwords": ""}).status_code == 422
+    assert c.post("/transcribe", json={"file": "runs/r1/source.mp4", "hotwords": "x" * 301}).status_code == 422
+
+
+def test_sheet_takes_a_pass_or_fail_mark_per_file(env):
+    c = env["client"]
+    f = ["runs/r1/source.mp4", "runs/r1/broll/H1A_768x1344.mp4"]
+    r = c.post("/sheet", json={"files": f, "status": ["pass", "fail"], "out": "runs/r1/marked.jpg"})
+    assert r.status_code == 200 and (env["root"] / "runs/r1/marked.jpg").stat().st_size > 1000
+    assert c.post("/sheet", json={"files": f, "status": [None, "fail"], "out": "runs/r1/m2.jpg"}).status_code == 200
+    assert c.post("/sheet", json={"files": f, "status": ["pass"], "out": "runs/r1/m3.jpg"}).status_code == 422       # one mark per file
+    assert c.post("/sheet", json={"files": f, "status": ["pass", "maybe"], "out": "runs/r1/m3.jpg"}).status_code == 422

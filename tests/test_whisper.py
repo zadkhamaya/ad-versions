@@ -65,3 +65,17 @@ def test_preload_loads_the_model_once(monkeypatch):
     whisper.preload()
     whisper.words("a.wav")
     assert loads == [1]
+
+
+def test_text_hands_hotwords_to_the_model_only_when_given(monkeypatch):
+    seen = []
+
+    class Spy(FakeModel):
+        def transcribe(self, path, **kw):
+            seen.append(kw)
+            return super().transcribe(path, **kw)
+
+    monkeypatch.setattr(whisper, "_model", Spy())
+    whisper.text("x.mp4")
+    whisper.text("x.mp4", hotwords="Calmora")
+    assert "hotwords" not in seen[0] and seen[1]["hotwords"] == "Calmora" and seen[1]["language"] == "en"

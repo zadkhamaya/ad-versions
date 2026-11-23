@@ -244,6 +244,7 @@ class TranscribeIn(BaseModel):
     file: str
     script: Optional[str] = Field(default=None, min_length=1, max_length=2000)
     version: Optional[str] = None
+    hotwords: Optional[str] = Field(default=None, min_length=1, max_length=300)    # names to expect (brand, product); never the script
 
     @field_validator("version")
     @classmethod
@@ -260,6 +261,7 @@ class LintIn(BaseModel):
 class SheetIn(BaseModel):
     files: list[str] = Field(min_length=1, max_length=18)
     out: str
+    status: Optional[list[Optional[Literal["pass", "fail"]]]] = None      # one mark per file: a green/red outline and a PASS/FAIL badge
 
     @field_validator("out")
     @classmethod
@@ -267,6 +269,12 @@ class SheetIn(BaseModel):
         if not v.lower().endswith(".jpg"):
             raise ValueError("out must be a .jpg path")
         return v
+
+    @model_validator(mode="after")
+    def _marks(self):
+        if self.status is not None and len(self.status) != len(self.files):
+            raise ValueError("status needs one entry per file")
+        return self
 
 
 class RunIn(BaseModel):
@@ -277,6 +285,9 @@ class RunIn(BaseModel):
     started_at: str
     finished_at: str
     disclaimer: Optional[str] = Field(default=None, min_length=1, max_length=400)    # the one burned into the end card
+    mode: Optional[str] = Field(default=None, max_length=200)             # one line for report.md: dry run (what is stand-in) or live
+    review_ready_at: Optional[str] = None                                # when the run reached its review (for the machine-time line)
+    review_note: Optional[str] = Field(default=None, max_length=2000)    # the reviewer's general note
     gpu_minutes: float = Field(ge=0, allow_inf_nan=False)
     gpu_rate_usd_h: float = Field(ge=0, allow_inf_nan=False)
     voice_usd: float = Field(ge=0, allow_inf_nan=False)
@@ -285,6 +296,7 @@ class RunIn(BaseModel):
     @model_validator(mode="after")
     def _times(self):
         package.turnaround_min(self.model_dump())    # ValueError -> 422: time zones present, finished not before started
+        package.machine_min(self.model_dump())       # ... and review_ready_at between them
         return self
 
 
@@ -296,6 +308,7 @@ class ApprovedIn(BaseModel):
     length_s: Optional[int] = None
     fmt: Optional[str] = None
     qa: Optional[dict] = None
+    note: str = Field(default="", max_length=2000)     # the reviewer's note on this version (required when approved over a QA failure)
     v: int = Field(default=1, ge=1, le=99)          # the V number in the file name: rises when the same name is rendered again
     approver: str = ""
     approved_at: str = ""
@@ -595,7 +608,7 @@ def transcribe(req: TranscribeIn):
     if not ffmpeg._has_audio(path):
         raise HTTPException(422, f"{req.file} has no audio stream")
     with RENDER_SLOTS:                           # the model's memory counts against the same cap as a render
-        text = whisper.text(str(path))
+        text = whisper.text(str(path), hotwords=req.hotwords) if req.hotwords else whisper.text(str(path))
     out = {"text": text, "banned": rulebook.hard_hits(text, _rulebook())}
     if req.script is not None:
         wer = qa.script_diff(req.script, text)
@@ -644,7 +657,7 @@ def contact_sheet(req: SheetIn):
     out, _ = resolve(req.out, must_exist=False)
     out.parent.mkdir(parents=True, exist_ok=True)
     try:
-        sheet.make(files, str(out))
+        sheet.make(files, str(out), status=req.status)
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return {"file": rel(out)}

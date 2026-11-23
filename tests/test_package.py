@@ -154,7 +154,7 @@ def test_report(built):
     assert cost == 0.4
     assert "Assets per shoot: 2" in text
     assert "Cost per asset: $0.40" in text and "(gpu_minutes/60 × rate + voice + LLM) ÷ approved" in text
-    assert "Turnaround: 90 min" in text
+    assert "Turnaround: 90 min (2026-11-22T08:00:00+07:00 to 2026-11-22T09:30:00+07:00)" in text
     assert "H1_30S_16X9" in text and "voice clipped the last word" in text
     assert res["report"] == {"assets": 2, "cost_per_asset_usd": 0.4, "turnaround_min": 90}
 
@@ -253,3 +253,52 @@ def test_v_number_and_disclaimer_come_from_the_request(renders, tmp_path):
     assert json.loads((out / "manifest.json").read_text())["files"][0]["disclaimer"].startswith("A clinician assesses")
     with pytest.raises(ValueError):
         package.build(RUN, [item(renders, "H1_15S_9X16", v=100)], [], out)
+
+
+def _text(tmp_path, run, approved, rejected=()):
+    package.build(run, approved, list(rejected), tmp_path / "p")
+    return (tmp_path / "p" / "report.md").read_text()
+
+
+def test_cost_per_asset_keeps_four_decimals_and_the_report_shows_cents_only_when_they_matter(renders, tmp_path):
+    two = [item(renders, "H1_15S_9X16"), item(renders, "H2_6S_1X1")]
+    cheap = {**RUN, "gpu_minutes": 0, "gpu_rate_usd_h": 0, "voice_usd": 0, "llm_usd": 0.0108}
+    res = package.build(cheap, two, [], tmp_path / "p")
+    assert res["report"]["cost_per_asset_usd"] == 0.0054                     # 0.0054 (0.0108 over two) rounded to 4 decimals, not to 0.01
+    assert "Cost per asset: $0.005" in (tmp_path / "p" / "report.md").read_text()
+    tiny = {**cheap, "llm_usd": 0.0004}
+    assert "Cost per asset: < $0.001" in _text(tmp_path, tiny, two)
+    free = {**cheap, "llm_usd": 0}
+    assert "Cost per asset: $0.00\n" in _text(tmp_path, free, two)
+    assert "Cost per asset: $0.40" in _text(tmp_path, RUN, two)                # cents as before from a cent up
+
+
+def test_report_says_the_mode_and_both_turnarounds_in_jakarta_time(renders, tmp_path):
+    run = {**RUN, "mode": "dry run: stand-in b-roll and voice; GPU and voice not costed", "review_ready_at": "2026-11-22T01:30:00Z"}
+    res = package.build(run, [item(renders, "H1_15S_9X16")], [], tmp_path / "p")
+    text = (tmp_path / "p" / "report.md").read_text()
+    assert "- Mode: dry run: stand-in b-roll and voice; GPU and voice not costed" in text
+    assert ("- Turnaround: machine time to review-ready 30 min; total including review 90 min "
+            "(2026-11-22T08:00:00+07:00 to 2026-11-22T09:30:00+07:00)") in text
+    assert res["report"]["machine_min"] == 30 and res["report"]["turnaround_min"] == 90
+    assert "Mode:" not in _text(tmp_path, RUN, [item(renders, "H1_15S_9X16")])        # no mode given, no line
+
+
+def test_review_ready_must_sit_between_start_and_finish(renders, tmp_path):
+    for bad in ("2026-11-22T00:00:00Z", "2026-11-22T03:00:00Z", "2026-11-22T01:30:00"):
+        with pytest.raises(ValueError):
+            package.build({**RUN, "review_ready_at": bad}, [item(renders, "H1_15S_9X16")], [], tmp_path / "p")
+
+
+def test_notes_on_approved_versions_and_the_general_note_reach_the_report(renders, tmp_path):
+    over = item(renders, "H1_15S_9X16", qa={"passed": False, "reasons": ["loudness -11.2 LUFS"]}, note="level is fine on a phone")
+    plain = item(renders, "H2_6S_1X1", note="nice cut")
+    text = _text(tmp_path, {**RUN, "review_note": "approved the lot\nafter a look"}, [over, plain])
+    assert "approved over QA: loudness -11.2 LUFS \u2014 level is fine on a phone" in text
+    assert "QA passed; note: nice cut" in text
+    assert "## Reviewer note" in text and "approved the lot after a look" in text
+
+
+def test_a_failed_qa_with_no_reason_still_says_so(renders, tmp_path):
+    bad = item(renders, "H1_15S_9X16", qa={"passed": False, "reasons": []})
+    assert "no reason given" in _text(tmp_path, RUN, [bad])
