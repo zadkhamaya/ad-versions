@@ -5,7 +5,7 @@ Two exported workflows, credentials stripped (names kept):
 | File | Workflow | What it does |
 |---|---|---|
 | `workflow.json` | **ad-versions** | brief form → source clip → beats → scripts → compliance → look line → b-roll (dry run) → render the 18 versions → QA → contact sheet → approval on Telegram (or the form) → package → done message. |
-| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time), then sends a Telegram message (run id, failing node, message cut to 300 characters) and writes `error.json` again with `telegram` (`sent`, `failed: <reason>` or `skipped: no chat id`), then stops; a failure in the trigger itself has no execution id, so its folder is `trigger-<timestamp>`. Pod clean-up comes with the live b-roll. |
+| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time), then sends a Telegram message (run id, failing node, message cut to 300 characters) and writes `error.json` again with `telegram` (`sent`, `failed: <reason>` or `skipped: no chat id`), then stops; a failure in the trigger itself has no execution id, so its folder is `trigger-<timestamp>`. for a failure in the live b-roll branch it first deletes the GPU pod (below). |
 
 Built and tested on n8n **2.46.6** (the tag pinned in `docker/.env`).
 
@@ -47,8 +47,7 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    or `fallback`) is kept in the run data.
 7. **B-roll**, stand-in branch: copies the six stand-in clips (`A|B|C` × `1344x768|768x1344`) from
    `/data/brand/fixtures/broll/` to `runs/<id>/broll/<hook><A|B|C>_<size>.mp4`: 12 files for two hooks, fewer when the
-   compliance pass dropped a shot. The **live** branch (toolkit pods and `/api/broll`) is a disabled stub node plus a
-   Stop and Error: the toolkit side is not deployed yet, so a run with B-roll set to Live stops there on purpose.
+   compliance pass dropped a shot. The **live** branch (toolkit pods and `/api/broll`) is described under "Live b-roll" below.
 8. **Run data**: `runs/<id>/run.json` holds the whole run so far (brief, beats, reframe, rulebook, scripts, compliance,
    look, b-roll, LLM cost). **Run: state for 12b** hands that same object (no binary) to the second half (below);
    **Run: summary** is a short side view for reading an execution.
@@ -185,6 +184,7 @@ and not in `slots`.
 | `Nous` | OpenAI API, Base URL `https://inference-api.nousresearch.com/v1` | every LLM and vision node (HTTP Request nodes using the credential's key; the URL is in the node). Model `google/gemini-4-argon`. |
 | `brief-form` | Basic Auth (user `brief`) | the Brief form's login. Without it the form answers 401. |
 | `telegram-demo` | Telegram (the bot's token) | every Telegram node: the approval photo and buttons, the review link, the done message, the failure message |
+| `toolkit-machine` | Header Auth: name `Authorization`, value `Bearer <machine token>` | every call to the toolkit (live b-roll and the error workflow's pod clean-up). Set its allowed domain to the toolkit host. |
 | R2 | | not in n8n: it is in the media service's env |
 
 The LLM nodes are HTTP Request nodes, not the OpenAI nodes: with a custom base URL they let the body carry
@@ -200,10 +200,9 @@ Two separate dropdowns on the form, both defaulting to the stand-in (a post that
   and R2 environment in the media service every version fails with the service's message (for example `missing environment:
   VOICE_SAMPLE_KEY, ...`); the run records those as failed versions, and when none can be rendered it ends with that reason in
   `error.json`.
-- **B-roll**: *Stand-in clips (no GPU)* copies the fixture clips; *Live (pods)* is the disabled stub that stops the run with a
-  clear message until the toolkit side exists. The package is uploaded to R2 only for live b-roll.
+- **B-roll**: *Stand-in clips (no GPU)* copies the fixture clips; *Live (pods)* runs the live branch (below). The package is uploaded to R2 only for live b-roll.
 - The old single "Dry run" checkbox is still understood when a script posts it (`[]` = live b-roll and real voice).
-- GPU and voice costs are not wired yet (0 in `/package`); report.md says so in its Mode line.
+- Voice cost is not wired yet (0 in `/package`). The GPU cost is the live b-roll's pod time at the pod's rate (stand-in b-roll: 0); report.md's Mode line says which.
 
 ## Beats syntax
 
@@ -244,7 +243,7 @@ S6 27.5-31.5 close 0.7 x1=0.42
 
 ## Import
 
-1. In n8n create the credentials above (`Nous`, `brief-form`, `telegram-demo`).
+1. In n8n create the credentials above (`Nous`, `brief-form`, `telegram-demo`, and `toolkit-machine` for live b-roll).
 2. Import `errors.json`, then `workflow.json` (Workflows → Import from file, or `POST /api/v1/workflows` with the
    file). Credentials are matched by name.
 3. In **ad-versions** → Settings → Error workflow, pick **ad-versions errors**, and publish both (an error workflow
@@ -269,6 +268,42 @@ curl -u brief:$PASSWORD http://127.0.0.1:5678/form/brief \
 
 The approval form is posted the same way (multipart): `field-0` once per ticked version, `field-1` the notes.
 
+## Live b-roll (B-roll = Live)
+
+Built against the toolkit's `/api/pods` and `/api/broll` (contract: the toolkit's docs/broll-api.md). Node names all start with `B-roll live: `.
+
+**Settings.** The toolkit's address is the one thing kept out of the repo: `data/config/toolkit.json` in the data folder
+(`/data/config/toolkit.json` in the container), `{"toolkit_url": "https://<toolkit host>"}`: https, a host, no path. The importer writes it, like
+`telegram.json`. Every call carries the `toolkit-machine` credential (a Header Auth `Authorization: Bearer <machine token>`; give it the toolkit host as its
+only allowed domain, so the token cannot go anywhere else). The error workflow reads the same file.
+
+**The pod.** `GET /api/pods` every 30 s, at most 30 minutes from the start of the branch (then the run fails with the state it was in).
+- No pod: `POST /api/pods/catalog` (a refresh), stop with a clear error unless `h3-t2v` is listed, then `POST /api/pods/deploy` with what the Pods page sends for a pod
+  with one bundle: `{"cap_hours": 8, "bundles": ["h3-t2v"], "addons": []}` (the page's defaults: the premium A6000, the default image, an 8 h cap; the toolkit's idle timer
+  deletes an unused pod after 30 minutes). A refusal (a 409 such as "the premium A6000 is out of stock, use the plain one?", the balance rail) stops the run with the toolkit's words:
+  the plain-A6000 and tunnel questions are the owner's.
+- A pod is there: a ready pod that has `h3-t2v` is reused; a build host, a pod without the bundle, a failed setup stop the run (a build host is never touched).
+  A pod that is booting, or deleting, is waited for (a deleting one is replaced).
+- Ready is not enough: the bundles download after it. The branch waits for the add queue to empty and the Downloader to say `done` (the check `/api/broll` makes itself).
+
+**The clips.** Per hook and shot, two sizes: `<hook><A|B|C>_1344x768.mp4` and `_768x1344.mp4`, the same names the stand-in branch writes, in `runs/<id>/broll/`
+(12 files for two hooks; fewer when compliance dropped a shot). The prompt is the shot, the look line, and `, 24 fps, no people, no text` (spec 4.3); `variant` `turbo8`, 3 seconds,
+a fixed seed per shot. One `POST /api/broll/jobs` carries every clip still to make (up to 12); a 409 with `retry: true` (one job at a time, still setting up) waits 20 s and asks again
+for up to 30 minutes; any other refusal, a 503 for the missing workflow export included, stops the run with the toolkit's message. The job is polled every 15 s; each finished clip
+is downloaded (the body must be an mp4) and written.
+- A job stops at its first failed clip; the clips already made are kept. That clip is asked for once more with a new seed (the next job holds it and everything not yet made);
+  a second failure, or a clip that cannot be downloaded twice, drops it. A step failure (no clip named) is retried once, then stops the run.
+- A slot needs both sizes: a shot with one size missing leaves its cutaway out (the media service drops a slot that is not sent), and `broll.notes` in run.json says why. If no
+  clip at all was made the run fails.
+- `run.json` → `broll`: `clips.<id>` has `wide`, `tall` (paths), `wide_wall_s`, `tall_wall_s`, `wide_tries`, `tall_tries` and `<size>_dropped` (the reason); `jobs` lists each job
+  (clips, state, wall seconds, error); `gpu_minutes`, `gpu_rate_usd_h` (the pod's price, which `/package` and report.md use), `gpu_cost_per_toolkit_usd` (the toolkit's own figure,
+  whole hours), `pod_delete`. **The API reports no generation time**: a clip's `wall_s` is the time from the job start (or the clip before) to the poll that first listed it, so it
+  includes setup for the first clip and is good to about 15 s; clips first listed in one poll share the interval. A reused pod counts only this run's time.
+
+**The clean-up.** After the last clip the branch calls `POST /api/pods/delete` (also for a reused pod). A delete that fails stops the run, so the error workflow tries again and tells you.
+Any failure in a `B-roll live: ...` node ends in the error workflow, which reads the toolkit address, asks `GET /api/pods`, and deletes the pod if one can be deleted now (never a build host),
+best effort; the outcome is `pod_cleanup` in error.json and a line in the Telegram message. Pods that outlive both are caught by the toolkit's 30-minute idle delete and the cap.
+
 ## Not built yet
 
-The live b-roll branch (pods and `/api/broll`), live GPU and voice costs in the report, and pod clean-up in the error workflow.
+The visual check per clip (spec 4.3: safety and match, one regeneration) and the voice cost in the report.

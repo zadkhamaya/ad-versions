@@ -98,9 +98,9 @@
     110
    ],
    "parameters": {
-    "content": "## ad-versions errors\nSet as the error workflow of **ad-versions**. Writes `runs/<id>/error.json` (node, message, time), then sends a Telegram message (credential `telegram-demo`, chat id from `data/config/telegram.json`): run id, failing node, message (300 characters, token-scrubbed), and writes error.json again with `telegram`: `sent`, `failed: <reason>` or `skipped: no chat id` (no call is made when the chat id cannot be read). The Telegram steps continue on error: this workflow has no error workflow of its own, so a failed send must end here, not loop. The failing execution's id is the run id; a failure in the trigger itself has none and gets `trigger-<timestamp>`.\n\n**Later:** delete any GPU pod the run started (with the live b-roll).",
+    "content": "## ad-versions errors\nSet as the error workflow of **ad-versions**. Writes `runs/<id>/error.json` (node, message, time), then sends a Telegram message (credential `telegram-demo`, chat id from `data/config/telegram.json`): run id, failing node, message (300 characters, token-scrubbed), and writes error.json again with `telegram`: `sent`, `failed: <reason>` or `skipped: no chat id` (no call is made when the chat id cannot be read). The Telegram steps continue on error: this workflow has no error workflow of its own, so a failed send must end here, not loop. The failing execution's id is the run id; a failure in the trigger itself has none and gets `trigger-<timestamp>`.\n\n**Pod clean-up** (only when the failing node is in the live b-roll branch, `B-roll live: ...`): reads the toolkit address from `data/config/toolkit.json`, `GET /api/pods`, and deletes the pod if there is one that can be deleted (never a build host), best effort; the outcome is `pod_cleanup` in error.json and a line in the Telegram message.",
     "width": 900,
-    "height": 260,
+    "height": 330,
     "color": 7
    }
   },
@@ -132,7 +132,7 @@
     0
    ],
    "parameters": {
-    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; };\nconst esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// The chat id is the one thing kept outside the repo and outside n8n's credential: data/config/telegram.json, {\"telegram_chat_id\": \"<digits>\"}.\nconst chatIdFrom = async (ctx, input) => {\n  if (!input || !input.binary || !input.binary.data) throw new Error('config/telegram.json was not read');\n  let cfg;\n  try { cfg = JSON.parse((await ctx.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); } catch (e) { throw new Error('config/telegram.json is not valid JSON'); }\n  const id = String(cfg && cfg.telegram_chat_id != null ? cfg.telegram_chat_id : '').trim();\n  if (!/^-?\\d{1,20}$/.test(id)) throw new Error('config/telegram.json: telegram_chat_id must be digits');\n  return id;\n};\n// The failure message: run, failing node, message (300 characters, token-scrubbed). Never throws: this workflow has no error workflow of its own.\ntry {\n  const chat_id = await chatIdFrom(this, $input.first());\n  const d = $('Error: build error.json').first().json;\n  const text = 'ad-versions run ' + d.run_id + ' failed\\nNode: ' + clip(scrub(d.node), 120) + '\\n' + clip(scrub(d.message), 300) + '\\n(runs/' + d.run_id + '/error.json)';\n  return [{ json: { chat_id, text: esc(text) } }];\n} catch (e) {\n  return [{ json: { error: clip(errText(e), 300) } }];\n}\n"
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; };\nconst esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// The chat id is the one thing kept outside the repo and outside n8n's credential: data/config/telegram.json, {\"telegram_chat_id\": \"<digits>\"}.\nconst chatIdFrom = async (ctx, input) => {\n  if (!input || !input.binary || !input.binary.data) throw new Error('config/telegram.json was not read');\n  let cfg;\n  try { cfg = JSON.parse((await ctx.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); } catch (e) { throw new Error('config/telegram.json is not valid JSON'); }\n  const id = String(cfg && cfg.telegram_chat_id != null ? cfg.telegram_chat_id : '').trim();\n  if (!/^-?\\d{1,20}$/.test(id)) throw new Error('config/telegram.json: telegram_chat_id must be digits');\n  return id;\n};\n// The failure message: run, failing node, message (300 characters, token-scrubbed). Never throws: this workflow has no error workflow of its own.\ntry {\n  const chat_id = await chatIdFrom(this, $input.first());\n  const d = $('Error: build error.json').first().json;\n  let pc = null;                                                                                 // the live b-roll's pod clean-up, when it ran\n  try { pc = $('Error: record the pod clean-up').first().json.pod_cleanup || null; } catch (e) { pc = null; }\n  const text = 'ad-versions run ' + d.run_id + ' failed\\nNode: ' + clip(scrub(d.node), 120) + '\\n' + clip(scrub(d.message), 300) + (pc ? '\\nPod: ' + clip(scrub(pc), 200) : '') + '\\n(runs/' + d.run_id + '/error.json)';\n  return [{ json: { chat_id, text: esc(text) } }];\n} catch (e) {\n  return [{ json: { error: clip(errText(e), 300) } }];\n}\n"
    }
   },
   {
@@ -207,7 +207,7 @@
     0
    ],
    "parameters": {
-    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; };\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// error.json again, now saying whether the failure message went out (sent, failed: <reason>, or skipped: no chat id).\nconst d = $('Error: build error.json').first().json;\nconst T = $('Error: Telegram text').first().json;\nconst r = $input.first().json;\nconst why = (e) => (/^config\\/telegram\\.json/.test(e) ? 'no chat id' : clip(e, 200));       // chatIdFrom's own messages are the no-chat-id case; any other text-step failure keeps its reason\nconst telegram = T.error ? 'skipped: ' + why(T.error) : r.error ? 'failed: ' + clip(errText(r.error), 300) : 'sent';\nconst data = { ...d, telegram };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'error.json', 'application/json');\nreturn [{ json: data, binary: { data: bin } }];\n"
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; };\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// error.json again, now saying whether the failure message went out (sent, failed: <reason>, or skipped: no chat id).\nconst d = $('Error: build error.json').first().json;\nconst T = $('Error: Telegram text').first().json;\nconst r = $input.first().json;\nconst why = (e) => (/^config\\/telegram\\.json/.test(e) ? 'no chat id' : clip(e, 200));       // chatIdFrom's own messages are the no-chat-id case; any other text-step failure keeps its reason\nconst telegram = T.error ? 'skipped: ' + why(T.error) : r.error ? 'failed: ' + clip(errText(r.error), 300) : 'sent';\nlet pc = null;\ntry { pc = $('Error: record the pod clean-up').first().json.pod_cleanup || null; } catch (e) { pc = null; }\nconst data = { ...d, telegram, ...(pc ? { pod_cleanup: pc } : {}) };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'error.json', 'application/json');\nreturn [{ json: data, binary: { data: bin } }];\n"
    }
   },
   {
@@ -226,6 +226,233 @@
     "options": {}
    },
    "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000026-0000-4000-8000-000000000000",
+   "name": "Error: failed in the live b-roll?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1150,
+    220
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ /^B-roll live/.test($('Error: build error.json').first().json.node) }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000027-0000-4000-8000-000000000000",
+   "name": "Error: read toolkit config",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    1380,
+    220
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "/data/config/toolkit.json",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000028-0000-4000-8000-000000000000",
+   "name": "Error: toolkit address",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1610,
+    220
+   ],
+   "parameters": {
+    "jsCode": "// Pod clean-up, step 1: the toolkit's address from data/config/toolkit.json. Never throws: this workflow has no error workflow of its own.\ntry {\n  const item = $input.first();\n  if (!item || !item.binary || !item.binary.data) return [{ json: { cleanup: 'skipped: config/toolkit.json was not read' } }];\n  let cfg;\n  try { cfg = JSON.parse((await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); } catch (e) { return [{ json: { cleanup: 'skipped: config/toolkit.json is not valid JSON' } }]; }\n  const url = String(cfg && cfg.toolkit_url != null ? cfg.toolkit_url : '').trim().replace(/\\/+$/, '');\n  if (!/^https:\\/\\/[A-Za-z0-9.-]+(:\\d{1,5})?$/.test(url)) return [{ json: { cleanup: 'skipped: config/toolkit.json has no usable toolkit_url' } }];\n  return [{ json: { toolkit_url: url } }];\n} catch (e) {\n  return [{ json: { cleanup: 'skipped: ' + String(e && e.message || e).slice(0, 150) } }];\n}\n"
+   }
+  },
+  {
+   "id": "00000029-0000-4000-8000-000000000000",
+   "name": "Error: toolkit address ok?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1840,
+    220
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ !!$json.toolkit_url }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000030-0000-4000-8000-000000000000",
+   "name": "Error: GET /api/pods",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2070,
+    220
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "={{ $('Error: toolkit address').first().json.toolkit_url }}/api/pods",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "timeout": 30000,
+     "response": {
+      "response": {
+       "fullResponse": true,
+       "neverError": true,
+       "responseFormat": "json"
+      }
+     }
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "name": "toolkit-machine"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000031-0000-4000-8000-000000000000",
+   "name": "Error: is there a pod to delete?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2300,
+    220
+   ],
+   "parameters": {
+    "jsCode": "// Pod clean-up, step 2: is there a GPU pod to delete? Only a pod (never a build host) that can be deleted now. Never throws.\ntry {\n  const r = $input.first().json || {};\n  const b = r.body || {};\n  if (r.error || r.statusCode !== 200) return [{ json: { delete: false, cleanup: 'failed: could not read the Pods page (' + (r.statusCode || 'no answer') + ')' } }];\n  const vm = b.vm;\n  if (!vm) return [{ json: { delete: false, cleanup: 'no pod to delete' } }];\n  const name = String(vm.name || '').slice(0, 60);\n  if (vm.kind === 'build') return [{ json: { delete: false, cleanup: 'left alone: ' + name + ' is a build host' } }];\n  if (vm.state === 'deleting') return [{ json: { delete: false, cleanup: 'pod ' + name + ' is already being deleted' } }];\n  if (!vm.actions || vm.actions.delete !== true) return [{ json: { delete: false, cleanup: 'failed: pod ' + name + ' cannot be deleted now (' + String(vm.state || '?').slice(0, 30) + '): delete it on the Pods page' } }];\n  return [{ json: { delete: true, pod: name } }];\n} catch (e) {\n  return [{ json: { delete: false, cleanup: 'failed: ' + String(e && e.message || e).slice(0, 150) } }];\n}\n"
+   }
+  },
+  {
+   "id": "00000032-0000-4000-8000-000000000000",
+   "name": "Error: delete the pod?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2530,
+    220
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.delete === true }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000033-0000-4000-8000-000000000000",
+   "name": "Error: POST /api/pods/delete",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    2760,
+    220
+   ],
+   "parameters": {
+    "method": "POST",
+    "url": "={{ $('Error: toolkit address').first().json.toolkit_url }}/api/pods/delete",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "timeout": 120000,
+     "response": {
+      "response": {
+       "fullResponse": true,
+       "neverError": true,
+       "responseFormat": "json"
+      }
+     }
+    },
+    "sendBody": true,
+    "contentType": "json",
+    "specifyBody": "json",
+    "jsonBody": "{}"
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "name": "toolkit-machine"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000034-0000-4000-8000-000000000000",
+   "name": "Error: record the pod clean-up",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2990,
+    360
+   ],
+   "parameters": {
+    "jsCode": "// Pod clean-up, step 3: the outcome as one line (pod_cleanup), kept in error.json and the Telegram message. Never throws.\ntry {\n  const d = $input.first().json || {};\n  let pod_cleanup;\n  if (d.cleanup) pod_cleanup = String(d.cleanup).slice(0, 200);\n  else {\n    let name = '';\n    try { name = String($('Error: is there a pod to delete?').first().json.pod || ''); } catch (e) { name = ''; }\n    const b = d.body || {};\n    if (!d.error && d.statusCode === 200) pod_cleanup = 'deleted pod ' + name;\n    else pod_cleanup = 'failed: the delete answered ' + (d.statusCode || 'nothing') + ' (' + String(b.error || (d.error && (d.error.message || d.error)) || 'no reason given').slice(0, 120) + '): delete it on the Pods page';\n  }\n  return [{ json: { pod_cleanup } }];\n} catch (e) {\n  return [{ json: { pod_cleanup: 'failed: ' + String(e && e.message || e).slice(0, 150) } }];\n}\n"
+   }
   }
  ],
  "connections": {
@@ -277,7 +504,7 @@
    "main": [
     [
      {
-      "node": "Error: read Telegram config",
+      "node": "Error: failed in the live b-roll?",
       "type": "main",
       "index": 0
      }
@@ -351,6 +578,126 @@
     [
      {
       "node": "Error: stop",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: failed in the live b-roll?": {
+   "main": [
+    [
+     {
+      "node": "Error: read toolkit config",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Error: read Telegram config",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: read toolkit config": {
+   "main": [
+    [
+     {
+      "node": "Error: toolkit address",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: toolkit address": {
+   "main": [
+    [
+     {
+      "node": "Error: toolkit address ok?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: toolkit address ok?": {
+   "main": [
+    [
+     {
+      "node": "Error: GET /api/pods",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Error: record the pod clean-up",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: GET /api/pods": {
+   "main": [
+    [
+     {
+      "node": "Error: is there a pod to delete?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: is there a pod to delete?": {
+   "main": [
+    [
+     {
+      "node": "Error: delete the pod?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: delete the pod?": {
+   "main": [
+    [
+     {
+      "node": "Error: POST /api/pods/delete",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Error: record the pod clean-up",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: POST /api/pods/delete": {
+   "main": [
+    [
+     {
+      "node": "Error: record the pod clean-up",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: record the pod clean-up": {
+   "main": [
+    [
+     {
+      "node": "Error: read Telegram config",
       "type": "main",
       "index": 0
      }
