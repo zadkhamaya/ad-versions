@@ -1,5 +1,6 @@
 """sheet.py — the contact sheet: one frame at 40 % of each version, 6 x 3, labelled with the file name.
-A file that cannot be read gets a labelled "no frame" cell; it never stops the others (spec §6)."""
+A file that cannot be read gets a labelled "no frame" cell; it never stops the others (spec §6).
+Also the reframe sheet (`reframe`): a row per beat, its middle frame with the crop windows drawn on it."""
 import os
 import subprocess
 import tempfile
@@ -78,3 +79,49 @@ def make(files, out_jpg):
         graph = "".join(f"[{i}:v]" for i in range(len(cells))) + f"concat=n={len(cells)}:v=1:a=0,tile={COLS}x{ROWS}:color=black"
         subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", graph, "-frames:v", "1", "-q:v", "3",
                         str(out_jpg)], check=True)
+
+
+ROW_W = 640
+BOX_COLOURS = {"9X16": "yellow", "1X1": "cyan"}      # drawbox colour names; any other format is drawn in white
+BOX_PX = 3
+
+
+def _label(textfile, text, x, y, colour="white", size=FONT_PX):
+    return (f"drawtext=fontfile={filter_path(FONT)}:textfile={filter_path(_write(textfile, text))}:expansion=none:fontsize={size}:"
+            f"fontcolor={colour}:box=1:boxcolor=black@0.7:boxborderw=3:x={x}:y={y}")
+
+
+def _reframe_row(row, tmp, n, out_png):
+    """One beat: its frame at row["t"] scaled to ROW_W px wide, a box per window (centre `cx`, width `wf`, both as fractions of the
+    frame's width), the beat name, a label per box ("9X16 x0.17", or "9X16 set 0.50" for a position that was given) and SPLIT."""
+    vf = [f"scale={ROW_W}:-2", "setsar=1"]
+    for k, b in enumerate(row["boxes"]):
+        x = min(max(round((b["cx"] - b["wf"] / 2) * ROW_W), 0), ROW_W - 2 * BOX_PX)
+        w = min(round(b["wf"] * ROW_W), ROW_W - x)
+        colour = BOX_COLOURS.get(b["fmt"], "white")
+        vf.append(f"drawbox=x={x}:y=0:w={w}:h=ih:color={colour}:t={BOX_PX}")
+        text = f"{b['fmt']} set {b['cx']:.2f}" if b.get("set") else f"{b['fmt']} x{b['cx']:.2f}"
+        vf.append(_label(os.path.join(tmp, f"box{n}_{k}.txt"), text, x + BOX_PX + 2, 30 + 22 * k, colour))
+    vf.append(_label(os.path.join(tmp, f"name{n}.txt"), row["name"], 6, 6, size=20))
+    if row.get("split"):
+        vf.append(_label(os.path.join(tmp, f"split{n}.txt"), "SPLIT", f"w-text_w-8", 6, "red", 20))
+    subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{row['t']:.3f}", "-i", str(row["src"]), "-frames:v", "1", "-vf", ",".join(vf),
+                    out_png], check=True, capture_output=True)
+    if not os.path.exists(out_png) or os.path.getsize(out_png) == 0:
+        raise RuntimeError(f"no frame of {row['name']} at {row['t']:.2f} s")
+
+
+def reframe(rows, out_jpg):
+    """The reframe sheet: one row per beat (dicts name, src, t, boxes [{fmt, cx, wf, set}], split), stacked, 640 px wide."""
+    if not rows:
+        raise ValueError("no beats for the reframe sheet")
+    with tempfile.TemporaryDirectory() as tmp:
+        pngs = []
+        for n, row in enumerate(rows, 1):
+            png = os.path.join(tmp, f"row{n:02d}.png")
+            _reframe_row(row, tmp, n, png)
+            pngs.append(png)
+        inputs = [a for p in pngs for a in ("-i", p)]
+        graph = "".join(f"[{i}:v]" for i in range(len(pngs))) + (f"vstack=inputs={len(pngs)}" if len(pngs) > 1 else "null")
+        subprocess.run(["ffmpeg", "-v", "error", "-y", *inputs, "-filter_complex", graph, "-frames:v", "1", "-q:v", "3", str(out_jpg)],
+                       check=True)

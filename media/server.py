@@ -192,6 +192,22 @@ class FramesIn(BaseModel):
         return self
 
 
+class ReframeIn(BaseModel):
+    """Suggested crop windows for the beats of a source clip. A beat's `face` (when given, and not "auto") or `x` is shown as set."""
+    run_id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,64}$")
+    source: str
+    beats: list[BeatIn] = Field(min_length=1, max_length=12)
+    formats: list[Literal["9X16", "1X1"]] = Field(default=["9X16", "1X1"], min_length=1)
+
+    @model_validator(mode="after")
+    def _unique(self):
+        names = [b.name for b in self.beats]
+        if len(set(names)) != len(names):
+            raise ValueError("beat names must be different")
+        self.formats = list(dict.fromkeys(self.formats))
+        return self
+
+
 class CheckIn(BaseModel):
     """What to check a file against: `version` (H1_15S_9X16) or `length_s` + `fmt`; given together they must agree."""
     file: str
@@ -608,6 +624,41 @@ def contact_sheet(req: SheetIn):
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     return {"file": rel(out)}
+
+
+def _given_position(beat: BeatIn, fmt: str, w: int, h: int):
+    """The window centre (fraction of the width, as it will be cropped) of a position the request gave for this beat and format:
+    its per-format `x`, or an explicit `face` other than auto; None where the beat asks for no position."""
+    face = beat.x[fmt] if beat.x and fmt in beat.x else (beat.face if "face" in beat.model_fields_set and beat.face != "auto" else None)
+    if face is None:
+        return None
+    cw = ffmpeg.crop_box(w, h, fmt)[0]
+    return round(((ffmpeg.crop_x(w, cw, face) if cw < w else 0) + cw / 2) / w, 4)
+
+
+@app.post("/reframe")
+def reframe_beats(req: ReframeIn):
+    """{"beats": {name: {fmt: suggestion}}, "sheet": "runs/<id>/reframe.jpg"}; a position the request gave is {"x", "set": true}."""
+    src, _ = resolve(req.source, run=req.run_id)
+    out, _ = resolve(f"runs/{req.run_id}/reframe.jpg", must_exist=False)
+    dur = ffmpeg.duration(src)
+    past = [b.name for b in req.beats if b.end > dur + 0.05]
+    if past:
+        raise HTTPException(422, f"beat(s) {', '.join(past)} end after the source clip's {dur:.2f} s")
+    w, h = ffmpeg._size(str(src))
+    run_dir = data_root() / "runs" / req.run_id
+    answer, rows = {}, []
+    for b in req.beats:
+        given = {f: _given_position(b, f, w, h) for f in req.formats}
+        todo = [f for f in req.formats if given[f] is None]
+        found = _suggestions(src, run_dir, timeline.Beat(b.name, b.start, b.end, b.role, b.face), todo) if todo else {}
+        answer[b.name] = {f: {"x": given[f], "set": True} if given[f] is not None else found[f] for f in req.formats}
+        rows.append({"name": b.name, "src": str(src), "t": (b.start + b.end) / 2, "split": any(found[f]["split"] for f in found),
+                     "boxes": [{"fmt": f, "cx": answer[b.name][f]["x"], "wf": ffmpeg.crop_box(w, h, f)[0] / w, "set": given[f] is not None}
+                               for f in req.formats]})
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sheet.reframe(rows, str(out))
+    return {"beats": answer, "sheet": rel(out)}
 
 
 @app.post("/package")

@@ -78,3 +78,38 @@ def test_a_small_blob_survives_the_grain_filter(tmp_path):
        "-crf", "18", "-pix_fmt", "yuv420p", str(tmp_path / "small.mp4"))
     r = reframe.suggest(str(tmp_path / "small.mp4"), 0.0, 3.0, "9X16")
     assert r["x"] > 0.6 and r["coverage"] > 0.9
+
+
+# the sheet
+
+def _pixels(jpg):
+    import subprocess
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(jpg)],
+                         capture_output=True, text=True, check=True).stdout.strip().split(",")
+    w, h = int(out[0]), int(out[1])
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(jpg), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], capture_output=True, check=True).stdout
+    return w, h, lambda x, y: tuple(raw[(y * w + x) * 3:(y * w + x) * 3 + 3])
+
+
+def test_the_sheet_has_a_640_px_row_per_beat_with_two_outlined_boxes(reframe_clips, tmp_path):
+    from media import sheet
+    src = str(reframe_clips / "left.mp4")
+    rows = [{"name": "S1", "src": src, "t": 1.5, "boxes": [{"fmt": "9X16", "cx": 0.5, "wf": 0.3167, "set": False},
+                                                          {"fmt": "1X1", "cx": 0.5, "wf": 0.5625, "set": True}], "split": False},
+            {"name": "S2", "src": src, "t": 1.5, "boxes": [{"fmt": "9X16", "cx": 0.2, "wf": 0.3167, "set": False}], "split": True}]
+    out = tmp_path / "r.jpg"
+    sheet.reframe(rows, str(out))
+    w, h, px = _pixels(out)
+    assert (w, h) == (640, 720)
+    yellow, cyan = px(220, 150), px(141, 150)      # left edges: 9X16 box 0.5 +- 0.158 = 219..421 px, 1X1 box 0.5 +- 0.281 = 140..500 px
+    assert yellow[0] > 180 and yellow[1] > 180 and yellow[2] < 90
+    assert cyan[0] < 90 and cyan[1] > 150 and cyan[2] > 150
+    assert px(420, 150)[0] > 180 and px(420, 150)[2] < 90        # the yellow box's right edge
+    assert not (px(141, 360 + 150)[0] < 90 and px(141, 360 + 150)[2] > 150)     # row 2 has no 1X1 box: no cyan edge there
+
+
+def test_a_one_row_sheet_works(reframe_clips, tmp_path):
+    from media import sheet
+    sheet.reframe([{"name": "S1", "src": str(reframe_clips / "left.mp4"), "t": 1.0,
+                    "boxes": [{"fmt": "9X16", "cx": 0.2, "wf": 0.3167, "set": False}], "split": False}], str(tmp_path / "r.jpg"))
+    assert _pixels(tmp_path / "r.jpg")[:2] == (640, 360)

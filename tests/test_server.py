@@ -1094,3 +1094,93 @@ def test_a_corrupt_reframe_cache_is_ignored(auto, monkeypatch):
     (auto["run"] / "reframe.json").write_text("{not json")
     j, faces = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
     assert faces[0] < 0.35 and json.loads((auto["run"] / "reframe.json").read_text())
+
+
+# ---- Task 6c: POST /reframe ----
+
+def _reframe_body(**kw):
+    b = {"run_id": "r1", "source": "runs/r1/clip.mp4", "beats": [{"name": "S1", "start": 0.0, "end": 3.0}, {"name": "S2", "start": 0.0, "end": 3.0}]}
+    b.update(kw)
+    return b
+
+
+@pytest.fixture
+def rf(env, reframe_clips):
+    shutil.copy(reframe_clips / "left.mp4", env["run"] / "clip.mp4")
+    env["clips"] = reframe_clips
+    return env
+
+
+def _size(path):
+    import subprocess
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "csv=p=0", str(path)],
+                         capture_output=True, text=True, check=True).stdout.strip().split(",")
+    return int(out[0]), int(out[1])
+
+
+def test_reframe_answers_each_beat_and_format_and_writes_a_sheet(rf):
+    r = rf["client"].post("/reframe", json=_reframe_body())
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["sheet"] == "runs/r1/reframe.jpg" and set(j["beats"]) == {"S1", "S2"}
+    for beat in j["beats"].values():
+        assert set(beat) == {"9X16", "1X1"}
+        assert set(beat["9X16"]) == {"x", "coverage", "faces", "split", "span"} and beat["9X16"]["x"] < 0.35 and not beat["9X16"]["split"]
+    jpg = rf["root"] / "runs/r1/reframe.jpg"
+    assert jpg.read_bytes()[:2] == b"\xff\xd8" and _size(jpg) == (640, 720)
+
+
+def test_reframe_flags_a_split_and_takes_the_formats_asked(rf):
+    shutil.copy(rf["clips"] / "split.mp4", rf["run"] / "clip.mp4")
+    j = rf["client"].post("/reframe", json=_reframe_body(formats=["9X16"])).json()
+    assert j["beats"]["S1"] == {"9X16": j["beats"]["S1"]["9X16"]} and j["beats"]["S1"]["9X16"]["split"] is True
+
+
+def test_reframe_shows_a_given_position_as_set_and_does_not_suggest_for_it(rf, monkeypatch):
+    from media import reframe
+    seen = []
+    real = reframe.analyse
+    monkeypatch.setattr(reframe, "analyse", lambda *a, **k: seen.append(a) or real(*a, **k))
+    b = _reframe_body()
+    b["beats"][0]["face"] = 0.5
+    b["beats"][1]["x"] = {"1X1": 0.3}
+    j = rf["client"].post("/reframe", json=b).json()
+    for fmt in ("9X16", "1X1"):                              # the centre of the window as cropped (an even offset): 0.5 to within a pixel
+        assert j["beats"]["S1"][fmt]["set"] is True and abs(j["beats"]["S1"][fmt]["x"] - 0.5) < 0.003
+    assert j["beats"]["S2"]["1X1"] == {"x": 0.3, "set": True} and j["beats"]["S2"]["9X16"]["x"] < 0.35 and "set" not in j["beats"]["S2"]["9X16"]
+    assert len(seen) == 1                                   # S1 needed none; S2 needed its 9X16 only
+    for explicit, want in (("left", 0.158), ("right", 0.842)):          # the window's centre: a 202 px window in the 640 px clip
+        b = _reframe_body(formats=["9X16"])
+        b["beats"][0]["face"] = explicit
+        got = rf["client"].post("/reframe", json=b).json()["beats"]["S1"]["9X16"]
+        assert got["set"] is True and abs(got["x"] - want) < 0.001
+    b = _reframe_body(formats=["9X16"])
+    b["beats"][0]["face"] = "auto"                           # auto is a suggestion, whatever the other fields
+    assert "set" not in rf["client"].post("/reframe", json=b).json()["beats"]["S1"]["9X16"]
+
+
+def test_reframe_shares_runs_cache_with_render(rf, monkeypatch):
+    from media import reframe
+    seen = []
+    real = reframe.analyse
+    monkeypatch.setattr(reframe, "analyse", lambda *a, **k: seen.append(a) or real(*a, **k))
+    c = rf["client"]
+    first = c.post("/reframe", json=_reframe_body()).json()
+    assert len(seen) == 2 and len(json.loads((rf["run"] / "reframe.json").read_text())) == 4        # 2 beats x 2 formats
+    assert c.post("/reframe", json=_reframe_body()).json() == first and len(seen) == 2
+
+
+def test_reframe_refusals(rf):
+    c = rf["client"]
+    assert c.post("/reframe", json=_reframe_body(source="../../etc/passwd")).status_code == 400
+    assert c.post("/reframe", json=_reframe_body(source="brand/clip.mp4")).status_code == 400
+    assert c.post("/reframe", json=_reframe_body(source="runs/r2/clip.mp4")).status_code == 400
+    assert c.post("/reframe", json=_reframe_body(source="runs/r1/nope.mp4")).status_code == 404
+    assert c.post("/reframe", json=_reframe_body(run_id="../x")).status_code == 422
+    assert c.post("/reframe", json=_reframe_body(beats=[])).status_code == 422
+    assert c.post("/reframe", json=_reframe_body(beats=[{"name": "S1", "start": 0, "end": 3}] * 2)).status_code == 422       # a name twice
+    assert c.post("/reframe", json=_reframe_body(beats=[{"name": f"S{i}", "start": 0, "end": 3} for i in range(13)])).status_code == 422
+    assert c.post("/reframe", json=_reframe_body(formats=["16X9"])).status_code == 422
+    assert c.post("/reframe", json=_reframe_body(formats=[])).status_code == 422
+    r = c.post("/reframe", json=_reframe_body(beats=[{"name": "S9", "start": 1, "end": 9}]))
+    assert r.status_code == 422 and "S9" in r.json()["detail"]
