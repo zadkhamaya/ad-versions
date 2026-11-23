@@ -83,7 +83,7 @@
    "type": "n8n-nodes-base.noOp",
    "typeVersion": 1,
    "position": [
-    1150,
+    2530,
     0
    ],
    "parameters": {}
@@ -98,11 +98,134 @@
     110
    ],
    "parameters": {
-    "content": "## ad-versions errors\nSet as the error workflow of **ad-versions**. For now: writes `runs/<id>/error.json` (node, message, time) and stops. The failing execution's id is the run id; a failure in the trigger itself has none and gets `trigger-<timestamp>`.\n\n**Later (12b):** delete any GPU pod the run started, then a Telegram message on the demo bot (credential `telegram-demo`) with the failing node's name.",
+    "content": "## ad-versions errors\nSet as the error workflow of **ad-versions**. Writes `runs/<id>/error.json` (node, message, time), then sends a Telegram message (credential `telegram-demo`, chat id from `data/config/telegram.json`): run id, failing node, message (300 characters, token-scrubbed), and writes error.json again with `telegram`: `sent`, `failed: <reason>` or `skipped: no chat id` (no call is made when the chat id cannot be read). The Telegram steps continue on error: this workflow has no error workflow of its own, so a failed send must end here, not loop. The failing execution's id is the run id; a failure in the trigger itself has none and gets `trigger-<timestamp>`.\n\n**Later:** delete any GPU pod the run started (with the live b-roll).",
     "width": 900,
-    "height": 200,
+    "height": 260,
     "color": 7
    }
+  },
+  {
+   "id": "00000020-0000-4000-8000-000000000000",
+   "name": "Error: read Telegram config",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    1150,
+    0
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "/data/config/telegram.json",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000021-0000-4000-8000-000000000000",
+   "name": "Error: Telegram text",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1380,
+    0
+   ],
+   "parameters": {
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; };\nconst esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// The chat id is the one thing kept outside the repo and outside n8n's credential: data/config/telegram.json, {\"telegram_chat_id\": \"<digits>\"}.\nconst chatIdFrom = async (ctx, input) => {\n  if (!input || !input.binary || !input.binary.data) throw new Error('config/telegram.json was not read');\n  let cfg;\n  try { cfg = JSON.parse((await ctx.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); } catch (e) { throw new Error('config/telegram.json is not valid JSON'); }\n  const id = String(cfg && cfg.telegram_chat_id != null ? cfg.telegram_chat_id : '').trim();\n  if (!/^-?\\d{1,20}$/.test(id)) throw new Error('config/telegram.json: telegram_chat_id must be digits');\n  return id;\n};\n// The failure message: run, failing node, message (300 characters, token-scrubbed). Never throws: this workflow has no error workflow of its own.\ntry {\n  const chat_id = await chatIdFrom(this, $input.first());\n  const d = $('Error: build error.json').first().json;\n  const text = 'ad-versions run ' + d.run_id + ' failed\\nNode: ' + clip(scrub(d.node), 120) + '\\n' + clip(scrub(d.message), 300) + '\\n(runs/' + d.run_id + '/error.json)';\n  return [{ json: { chat_id, text: esc(text) } }];\n} catch (e) {\n  return [{ json: { error: clip(errText(e), 300) } }];\n}\n"
+   }
+  },
+  {
+   "id": "00000022-0000-4000-8000-000000000000",
+   "name": "Error: chat id read?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1610,
+    0
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ !!$json.chat_id }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000023-0000-4000-8000-000000000000",
+   "name": "Error: Telegram message",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1840,
+    -80
+   ],
+   "parameters": {
+    "resource": "message",
+    "operation": "sendMessage",
+    "chatId": "={{ $json.chat_id }}",
+    "text": "={{ $json.text }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "credentials": {
+    "telegramApi": {
+     "name": "telegram-demo"
+    }
+   },
+   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-000000000023",
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000024-0000-4000-8000-000000000000",
+   "name": "Error: record the Telegram result",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    2070,
+    0
+   ],
+   "parameters": {
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '\u2026' : s; };\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// error.json again, now saying whether the failure message went out (sent, failed: <reason>, or skipped: no chat id).\nconst d = $('Error: build error.json').first().json;\nconst T = $('Error: Telegram text').first().json;\nconst r = $input.first().json;\nconst why = (e) => (/^config\\/telegram\\.json/.test(e) ? 'no chat id' : clip(e, 200));       // chatIdFrom's own messages are the no-chat-id case; any other text-step failure keeps its reason\nconst telegram = T.error ? 'skipped: ' + why(T.error) : r.error ? 'failed: ' + clip(errText(r.error), 300) : 'sent';\nconst data = { ...d, telegram };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'error.json', 'application/json');\nreturn [{ json: data, binary: { data: bin } }];\n"
+   }
+  },
+  {
+   "id": "00000025-0000-4000-8000-000000000000",
+   "name": "Error: write error.json (with Telegram)",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    2300,
+    0
+   ],
+   "parameters": {
+    "operation": "write",
+    "fileName": "=/data/runs/{{ $json.run_id }}/error.json",
+    "dataPropertyName": "data",
+    "options": {}
+   },
+   "onError": "continueRegularOutput"
   }
  ],
  "connections": {
@@ -151,6 +274,79 @@
    ]
   },
   "Error: write error.json": {
+   "main": [
+    [
+     {
+      "node": "Error: read Telegram config",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: read Telegram config": {
+   "main": [
+    [
+     {
+      "node": "Error: Telegram text",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: Telegram text": {
+   "main": [
+    [
+     {
+      "node": "Error: chat id read?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: chat id read?": {
+   "main": [
+    [
+     {
+      "node": "Error: Telegram message",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Error: record the Telegram result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: Telegram message": {
+   "main": [
+    [
+     {
+      "node": "Error: record the Telegram result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: record the Telegram result": {
+   "main": [
+    [
+     {
+      "node": "Error: write error.json (with Telegram)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: write error.json (with Telegram)": {
    "main": [
     [
      {

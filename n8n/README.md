@@ -4,8 +4,8 @@ Two exported workflows, credentials stripped (names kept):
 
 | File | Workflow | What it does |
 |---|---|---|
-| `workflow.json` | **ad-versions** | brief form → source clip → beats → scripts → compliance → look line → b-roll (dry run) → render the 18 versions → QA → contact sheet → approval form → package. |
-| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time) and stops; a failure in the trigger itself has no execution id, so its folder is `trigger-<timestamp>`. Telegram and pod clean-up come with the live b-roll. |
+| `workflow.json` | **ad-versions** | brief form → source clip → beats → scripts → compliance → look line → b-roll (dry run) → render the 18 versions → QA → contact sheet → approval on Telegram (or the form) → package → done message. |
+| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time), then sends a Telegram message (run id, failing node, message cut to 300 characters) and writes `error.json` again with `telegram` (`sent`, `failed: <reason>` or `skipped: no chat id`), then stops; a failure in the trigger itself has no execution id, so its folder is `trigger-<timestamp>`. Pod clean-up comes with the live b-roll. |
 
 Built and tested on n8n **2.46.6** (the tag pinned in `docker/.env`).
 
@@ -73,16 +73,16 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
 12. **Sheet** (`POST /sheet`, all rendered files in matrix order → `runs/<id>/sheet.jpg`, a green PASS or red FAIL on every
     cell) and **Approval: build**: the summary line (`18 versions: 17 passed, 1 failed (H2_6S_1X1: loudness ...)`), the sheet
     (shown in the form through the sheet link below) and a table of every version with its QA.
-13. **Approval: form** is a Wait node resumed by a form (no Telegram bot yet; the form-waiting path is public by design,
-    its URL carries a signature). One checkbox per version, the ones that passed pre-ticked, and a notes box (one note
-    per line, `H2_6S_1X1: voice clipped`; other lines are a general note, which goes to report.md). **A version that failed QA
-    can be approved only with a note** (`VERSION: why`): ticked without one it is rejected with "override needs a note". An
-    approved version's note goes to `/package` and report.md ("approved over QA: reasons — note"). Wait limit 7 days; when
-    it runs out the form returns no submission and the run is recorded as `expired`, nothing packaged. The form's URL is in
-    `run.json` → `approval.form_url` (written before the wait), and a reviewer, or a script, posts it as multipart:
-    `field-0` repeated per ticked version, `field-1` the notes. A tick on a version that was never rendered is ignored.
-    The form lists all 18 versions as static options because n8n validates the Wait node's field list when the workflow
-    is published, so it cannot be built per run; the table above it says which were not made.
+13. **Approval** has two ways in that end in the same place (see "Approval on Telegram" below). **Approval: form** is a Wait node
+    resumed by a form (the form-waiting path is public by design, its URL carries a signature). One checkbox per version, the ones
+    that passed pre-ticked, and a notes box (one note per line, `H2_6S_1X1: voice clipped`; other lines are a general note, which
+    goes to report.md). **A version that failed QA can be approved only with a note** (`VERSION: why`): ticked without one it is
+    rejected with "override needs a note". An approved version's note goes to `/package` and report.md ("approved over QA:
+    reasons — note"). Wait limit 7 days; when it runs out the form returns no submission and the run is recorded as `expired`,
+    nothing packaged. The form's URL is in `run.json` → `approval.form_url` (written before the wait), and a reviewer, or a
+    script, posts it as multipart: `field-0` repeated per ticked version, `field-1` the notes. A tick on a version that was never
+    rendered is ignored. The form lists all 18 versions as static options because n8n validates the Wait node's field list when
+    the workflow is published, so it cannot be built per run; the table above it says which were not made.
 14. **Package: body** → **POST /package**: approved items (`file`, `version`, `hook_text` = the hook's 6 s line,
     `script`, `length_s`, `fmt`, `synthetic_media`, `qa`, approver `reviewer`, approval time = the form's submission time),
     rejected items with the reviewer's note and why (QA reasons, not made), and `run` = brand (the rulebook's),
@@ -103,11 +103,46 @@ the protection: 128 random bits made in **Render: plan** (`crypto.randomBytes`, 
 `NODE_FUNCTION_ALLOW_BUILTIN=crypto`) and stored in `run.json` (`sheet_token`, `sheet_url`). A wrong or missing token, a run
 that does not exist or a malformed id answers 404, and the only file ever served is `runs/<id>/sheet.jpg`.
 
-Two **disabled** Telegram nodes (a photo with the summary, then Send and Wait with *Approve passed* / *Review*) sit
-unconnected under the approval step. They replace the form once the `telegram-demo` credential and a chat id exist:
-connect the sheet to the photo, the photo to Send and Wait, and send *Review* on to the form. Two fixes wait for
-that: sendPhoto needs the sheet as binary (read the file, send that), and `$env.TELEGRAM_DEMO_CHAT_ID` is refused when n8n
-blocks env access in nodes (use a credential field or a Set node).
+### Approval on Telegram
+
+Telegram is the first contact for the approval; the form stays behind it. After the sheet and the run.json write:
+
+1. **Telegram: read config** reads `data/config/telegram.json` (inside the containers `/data/config/telegram.json`), the shape
+   `{"telegram_chat_id": "<digits>"}`. The chat id is in that file only: not in the repo, not in an environment variable (the
+   container keeps n8n's environment access in nodes blocked, so `$env` cannot read it), not in the credential. The same file
+   serves the error workflow. To start, open the bot in Telegram, send it any message, and write your chat id into the file.
+2. **Telegram: sheet photo**: `runs/<id>/sheet.jpg` (read by **Telegram: read sheet**, sent as binary) with the summary line as the
+   caption: `18 versions: 16 passed, 2 failed (H1_30S_9X16: voice-over differs ...; ...)`, failures listed while they fit in
+   800 characters, then `+N more`.
+3. **Telegram: approve or review** (regular output, `alwaysOutputData`: a send failure comes out as `{error}` and goes to **Telegram: failed**; a timeout
+   comes out as one empty item = no answer = expired), a Send and Wait with two link buttons (a button opens the signed `webhook-waiting` URL in the phone's
+   browser, which is public through the access layer by design, like the form's):
+   - **Approve passed**: every passed version is approved, every other one rejected with the note `not approved (failed QA: <reasons>)` (or
+     `not made: <reason>`), general note `approved on Telegram`, approver `reviewer (Telegram)`. No form.
+   - **Review**: **Telegram: review link** sends a message with the link of the approval form and the run continues into the form
+     unchanged (ticks, override notes), approver `reviewer (form)`.
+   - No version passed QA: Approve passed approves nothing (general note `nothing approved (no version passed QA)`), the normal nothing-packaged path.
+   - No tap in 7 days: the same `expired` path as the form, nothing packaged; `run.json` → `approval.channel` says which channel (Telegram or form) ran out.
+4. Both answers leave in the same shape (`approved`, `rejected`, `approved_notes`, `general_note`, `submitted_at`, plus `approver`) and join
+   at **Package: body**; `run.json` → `approval.via` says which.
+
+**If Telegram fails**, the run does not: any of those steps (the config missing or without digits, a wrong credential, no network, a chat
+that never started the bot, a missing sheet) ends in **Telegram: failed**, which records the message (token scrubbed, 300
+characters) as `telegram_error` in `run.json` straight away and goes on to the form as before. The final run.json keeps `telegram_error`.
+
+**The done message**: after `/package` builds, **Telegram: done text** / **done message** send the run id, approved and rejected counts and
+who approved, cost per asset, machine time to review-ready and total turnaround, the package folder (and the R2 link on a live run). Nothing
+approved or an expired approval sends one line saying so (and which channel expired). A message that cannot be sent is logged in run.json as
+`telegram_done`: `sent`, `failed: <reason>`, `skipped: no chat id` (the config could not be read, so no call is made) or `skipped: <reason>` (the text
+could not be built); it never fails the run.
+Nothing is sent when the package failed (the error workflow tells you).
+
+**The failure message** (error workflow): after `error.json` is written, run id, failing node and the message (300 characters, bot-token patterns
+scrubbed). Its Telegram steps continue on error and the workflow has no error workflow of its own, so a failed send ends there; with no
+readable chat id no call is made. The outcome is written into `error.json` (rewritten after the send) as `telegram`: `sent`,
+`failed: <reason>` or `skipped: no chat id`.
+
+Telegram texts are sent in HTML mode with `&`, `<`, `>` escaped; the Send and Wait text is plain on purpose (n8n sends that one as Markdown).
 
 ### The dry-run voice and the music placeholder
 
@@ -142,7 +177,7 @@ and not in `slots`.
 |---|---|---|
 | `Nous` | OpenAI API, Base URL `https://inference-api.nousresearch.com/v1` | every LLM and vision node (HTTP Request nodes using the credential's key; the URL is in the node). Model `google/gemini-4-argon`. |
 | `brief-form` | Basic Auth (user `brief`) | the Brief form's login. Without it the form answers 401. |
-| `telegram-demo` | Telegram | later: the disabled approval nodes, and the failure message in the error workflow |
+| `telegram-demo` | Telegram (the bot's token) | every Telegram node: the approval photo and buttons, the review link, the done message, the failure message |
 | R2 | | not in n8n: it is in the media service's env |
 
 The LLM nodes are HTTP Request nodes, not the OpenAI nodes: with a custom base URL they let the body carry
@@ -193,13 +228,14 @@ S6 27.5-31.5 close 0.7 x1=0.42
 - Execution history is pruned: `EXECUTIONS_DATA_PRUNE=true`, `EXECUTIONS_DATA_MAX_AGE=336` (hours, 14 days). A run keeps
   the brief and three base64 frames in its execution data.
 - The n8n container also needs `NODE_FUNCTION_ALLOW_BUILTIN=crypto` (the sheet link's token).
+- `data/config/telegram.json` (`{"telegram_chat_id": "<digits>"}`, see above) in the data folder for the Telegram messages; without it the run uses the form.
 - The media service must have `POST /run` and `/render`'s `voice` (see `docs/api.md`).
 - The dry-run clips live in the data folder: `n8n/fixtures/make-broll.sh` makes them (`n8n/fixtures/broll/` ships in
   the repo, six files of about 85 KB); copy that folder to `/data/brand/fixtures/broll/` once.
 
 ## Import
 
-1. In n8n create the credentials above (`Nous`, `brief-form`).
+1. In n8n create the credentials above (`Nous`, `brief-form`, `telegram-demo`).
 2. Import `errors.json`, then `workflow.json` (Workflows → Import from file, or `POST /api/v1/workflows` with the
    file). Credentials are matched by name.
 3. In **ad-versions** → Settings → Error workflow, pick **ad-versions errors**, and publish both (an error workflow
@@ -226,5 +262,4 @@ The approval form is posted the same way (multipart): `field-0` once per ticked 
 
 ## Not built yet
 
-The live b-roll branch (pods and `/api/broll`), live GPU and voice costs in the report, the Telegram approval, pod clean-up
-and the Telegram message in the error workflow.
+The live b-roll branch (pods and `/api/broll`), live GPU and voice costs in the report, and pod clean-up in the error workflow.

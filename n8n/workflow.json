@@ -1299,7 +1299,7 @@
     2700
    ],
    "parameters": {
-    "content": "# 5 Contact sheet and approval\n`/sheet` (green PASS or red FAIL on each cell), then a Wait node resumed by a form: summary, the sheet, every version with its QA, passed ones pre-ticked. A failed version can be ticked only with a note `VERSION: why`. Wait limit 7 days; no submission = expired, nothing packaged. The form URL and the sheet link are in run.json.\nThe two disabled Telegram nodes below replace the form once the `telegram-demo` credential exists. When enabling them: sendPhoto needs the sheet as binary (read the file first, send that), and `$env.TELEGRAM_DEMO_CHAT_ID` is blocked unless the container allows env access (use a credential field or a Set node instead).",
+    "content": "# 5 Contact sheet and approval\n`/sheet` (green PASS or red FAIL on each cell), then the approval. **First contact is Telegram** (credential `telegram-demo`, chat id read from `data/config/telegram.json`): the sheet as a photo with the summary, then Send and Wait with two buttons. **Approve passed** approves every passed version and rejects the rest; **Review** sends the link of the approval form (the Wait node below: ticks per version, override notes) and goes on into it. If Telegram fails at any step the error goes to run.json (`telegram_error`) and the form takes over. Wait limit 7 days on both; no answer = expired (run.json says which channel), nothing packaged. A failed version can be ticked in the form only with a note `VERSION: why`. The form URL and the sheet link are in run.json.",
     "width": 1700,
     "height": 640,
     "color": 6
@@ -1315,8 +1315,8 @@
     2700
    ],
    "parameters": {
-    "content": "# 6 Package\n`/package` with approved items (and their notes), rejected items with the reason, and the run's facts (mode, times, costs, link, CTA). Stand-in b-roll: no upload (the media service has no R2 environment yet). A failed package ends the run in error (error workflow); nothing approved or an expired form ends it normally. The answer goes into run.json.",
-    "width": 2050,
+    "content": "# 6 Package\n`/package` with approved items (and their notes), rejected items with the reason, and the run's facts (mode, times, costs, link, CTA). Stand-in b-roll: no upload (the media service has no R2 environment yet). A built package sends the done message on Telegram (run, counts, cost per asset, turnaround, folder); nothing approved or an expired approval sends a one-line message saying so. A message that cannot be sent is logged in run.json as `telegram_done` (`sent`, `failed: ...` or `skipped: no chat id`) and never fails the run. A failed package ends the run in error (error workflow); nothing approved or an expired approval ends it normally. The answer goes into run.json.",
+    "width": 3440,
     "height": 640,
     "color": 4
    }
@@ -1731,7 +1731,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// run.json now holds the QA results and the approval form's URL (the controller opens it).\nconst { saved_at, ...S } = $('Run data: build run.json').first().json;\nconst A = $input.first().json;\nconst data = { ...S, qa: A.results, not_made: A.not_made, summary: A.summary, sheet: A.sheet.file,\n  llm_usd: S.llm_usd + A.llm_usd_12b,\n  sheet_token: A.sheet_token, sheet_url: A.sheet_url,\n  approval: { status: 'waiting', form_url: A.form_url, waiting_since: A.waiting_since, wait_limit: '7 days' }, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { form_url: A.form_url }, binary: { data: bin } }];\n"
+    "jsCode": "// run.json now holds the QA results and the approval form's URL (the controller opens it).\nconst { saved_at, ...S } = $('Run data: build run.json').first().json;\nconst A = $input.first().json;\nconst data = { ...S, qa: A.results, not_made: A.not_made, summary: A.summary, sheet: A.sheet.file,\n  llm_usd: S.llm_usd + A.llm_usd_12b,\n  sheet_token: A.sheet_token, sheet_url: A.sheet_url,\n  approval: { status: 'waiting', form_url: A.form_url, waiting_since: A.waiting_since, wait_limit: '7 days' }, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { form_url: A.form_url, run: data }, binary: { data: bin } }];\n"
    }
   },
   {
@@ -1856,7 +1856,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// What the reviewer ticked and wrote. No submission time = the wait ran out (expired): nothing is packaged.\nconst r = $input.first().json;\nconst A = $('Approval: build').first().json;\nif (!r.submittedAt) return [{ json: { expired: true, approved: [], rejected: [], ignored: [], refused: [], approved_notes: {}, general_note: '', submitted_at: null } }];\nconst sel = r['Approve versions'];\nconst ticked = (Array.isArray(sel) ? sel : (sel ? [sel] : [])).map((x) => String(x).trim());\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst notes = {}; const general = [];\nfor (const line of String(r['Review notes'] || '').split(/\\r?\\n/)) {\n  const t = line.trim(); if (!t) continue;\n  const m = t.match(/^(H\\d_\\d+S_[A-Z0-9]+)\\s*[:\\-–]\\s*(.+)$/);\n  if (m) notes[m[1]] = (notes[m[1]] ? notes[m[1]] + ' ' : '') + m[2]; else general.push(t);\n}\nconst approved = [], rejected = [], ignored = [], refused = [], approved_notes = {};\nfor (const v of A.all) {\n  const res = byId[v];\n  const made = res && res.file;\n  if (ticked.includes(v) && made) {\n    if (res.status === 'failed' && !notes[v]) {        // approving over a QA failure needs a reason on record\n      refused.push(v);\n      rejected.push({ version: v, note: 'override needs a note: failed QA (' + res.qa.reasons.join('; ') + '); tick it again and write \"' + v + ': why\" in the notes box' });\n      continue;\n    }\n    approved.push(v); approved_notes[v] = notes[v] || ''; continue;\n  }\n  if (ticked.includes(v) && !made) ignored.push(v);\n  const nm = A.not_made.find((n) => n.version === v);\n  const why = nm ? 'not made: ' + nm.reason : (!res ? 'not made' : res.status === 'failed' ? 'failed QA: ' + res.qa.reasons.join('; ') : 'not approved by the reviewer');\n  rejected.push({ version: v, note: notes[v] ? notes[v] + ' (' + why + ')' : why });\n}\nreturn [{ json: { expired: false, approved, rejected, ignored, refused, approved_notes, general_note: general.join(' '), submitted_at: r.submittedAt } }];\n"
+    "jsCode": "// What the reviewer ticked and wrote. No submission time = the wait ran out (expired): nothing is packaged.\nconst r = $input.first().json;\nconst A = $('Approval: build').first().json;\nif (!r.submittedAt) return [{ json: { expired: true, channel: 'form', approver: 'reviewer (form)', approved: [], rejected: [], ignored: [], refused: [], approved_notes: {}, general_note: '', submitted_at: null } }];\nconst sel = r['Approve versions'];\nconst ticked = (Array.isArray(sel) ? sel : (sel ? [sel] : [])).map((x) => String(x).trim());\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst notes = {}; const general = [];\nfor (const line of String(r['Review notes'] || '').split(/\\r?\\n/)) {\n  const t = line.trim(); if (!t) continue;\n  const m = t.match(/^(H\\d_\\d+S_[A-Z0-9]+)\\s*[:\\-–]\\s*(.+)$/);\n  if (m) notes[m[1]] = (notes[m[1]] ? notes[m[1]] + ' ' : '') + m[2]; else general.push(t);\n}\nconst approved = [], rejected = [], ignored = [], refused = [], approved_notes = {};\nfor (const v of A.all) {\n  const res = byId[v];\n  const made = res && res.file;\n  if (ticked.includes(v) && made) {\n    if (res.status === 'failed' && !notes[v]) {        // approving over a QA failure needs a reason on record\n      refused.push(v);\n      rejected.push({ version: v, note: 'override needs a note: failed QA (' + res.qa.reasons.join('; ') + '); tick it again and write \"' + v + ': why\" in the notes box' });\n      continue;\n    }\n    approved.push(v); approved_notes[v] = notes[v] || ''; continue;\n  }\n  if (ticked.includes(v) && !made) ignored.push(v);\n  const nm = A.not_made.find((n) => n.version === v);\n  const why = nm ? 'not made: ' + nm.reason : (!res ? 'not made' : res.status === 'failed' ? 'failed QA: ' + res.qa.reasons.join('; ') : 'not approved by the reviewer');\n  rejected.push({ version: v, note: notes[v] ? notes[v] + ' (' + why + ')' : why });\n}\nreturn [{ json: { expired: false, channel: 'form', approver: 'reviewer (form)', approved, rejected, ignored, refused, approved_notes, general_note: general.join(' '), submitted_at: r.submittedAt } }];\n"
    }
   },
   {
@@ -1870,7 +1870,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// POST /package body per docs/api.md. Costs: GPU and voice are not costed yet (0); upload only for a live b-roll run (R2 env needed).\nconst P = $input.first().json;\nif (P.expired) return [{ json: { ...P, any: false } }];\nconst A = $('Approval: build').first().json;\nconst S = $('Run: state for 12b').first().json;\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst hookOf = (id) => (S.hooks || []).find((h) => h.id === id);\nconst approved = P.approved.map((v) => {\n  const r = byId[v];\n  const hook = hookOf(r.hook);\n  return { version: v, file: r.file, hook_text: (hook && hook.lines && hook.lines['6']) || r.line, script: r.line, length_s: r.length_s, fmt: r.fmt,\n    synthetic_media: true, qa: r.qa, note: P.approved_notes[v] || '', v: 1, approver: 'reviewer', approved_at: P.submitted_at };\n});\nconst campaign = String(S.brief.product || '').trim().slice(0, 60) || 'Campaign';\nconst mode = (S.voice_mode === 'real' ? 'real' : 'stand-in') + ' voice, ' + (S.broll_mode === 'live' ? 'live' : 'stand-in') + ' b-roll; GPU and voice not costed yet';\nconst run = {\n  brand: String(S.rulebook.brand || S.brief.brand).slice(0, 40), campaign,\n  started_at: $('Brief form').first().json.submittedAt, review_ready_at: A.waiting_since, finished_at: new Date().toISOString(),\n  disclaimer: S.disclaimer, mode,\n  gpu_minutes: 0, gpu_rate_usd_h: 0, voice_usd: 0,\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n};\nif (P.general_note) run.review_note = P.general_note;\nif (S.brief.landing_url) run.link = S.brief.landing_url;\nif (S.brief.cta) run.cta = S.brief.cta;\nconst upload = S.broll_mode === 'live';                  // a stand-in run has no R2 environment to upload to; a live one needs it, or /package says so\nreturn [{ json: { ...P, any: approved.length > 0, body: { run_id: S.run_id, run, approved, rejected: P.rejected, upload } } }];\n"
+    "jsCode": "// POST /package body per docs/api.md. Costs: GPU and voice are not costed yet (0); upload only for a live b-roll run (R2 env needed).\nconst P = $input.first().json;\nif (P.expired) return [{ json: { ...P, any: false } }];\nconst A = $('Approval: build').first().json;\nconst S = $('Run: state for 12b').first().json;\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst hookOf = (id) => (S.hooks || []).find((h) => h.id === id);\nconst approved = P.approved.map((v) => {\n  const r = byId[v];\n  const hook = hookOf(r.hook);\n  return { version: v, file: r.file, hook_text: (hook && hook.lines && hook.lines['6']) || r.line, script: r.line, length_s: r.length_s, fmt: r.fmt,\n    synthetic_media: true, qa: r.qa, note: P.approved_notes[v] || '', v: 1, approver: P.approver || 'reviewer (form)', approved_at: P.submitted_at };\n});\nconst campaign = String(S.brief.product || '').trim().slice(0, 60) || 'Campaign';\nconst mode = (S.voice_mode === 'real' ? 'real' : 'stand-in') + ' voice, ' + (S.broll_mode === 'live' ? 'live' : 'stand-in') + ' b-roll; GPU and voice not costed yet';\nconst run = {\n  brand: String(S.rulebook.brand || S.brief.brand).slice(0, 40), campaign,\n  started_at: $('Brief form').first().json.submittedAt, review_ready_at: A.waiting_since, finished_at: new Date().toISOString(),\n  disclaimer: S.disclaimer, mode,\n  gpu_minutes: 0, gpu_rate_usd_h: 0, voice_usd: 0,\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n};\nif (P.general_note) run.review_note = P.general_note;\nif (S.brief.landing_url) run.link = S.brief.landing_url;\nif (S.brief.cta) run.cta = S.brief.cta;\nconst upload = S.broll_mode === 'live';                  // a stand-in run has no R2 environment to upload to; a live one needs it, or /package says so\nreturn [{ json: { ...P, any: approved.length > 0, body: { run_id: S.run_id, run, approved, rejected: P.rejected, upload } } }];\n"
    }
   },
   {
@@ -1961,7 +1961,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const B = $input.first().json;\nconst status = B.expired ? 'expired' : 'nothing_approved';\nreturn [{ json: { ...B, package_status: status, package: { ok: false, error: B.expired ? 'the approval form was not submitted in 7 days: expired, nothing packaged' : 'nothing was approved: no package' } } }];\n"
+    "jsCode": "const B = $input.first().json;\nconst status = B.expired ? 'expired' : 'nothing_approved';\nreturn [{ json: { ...B, package_status: status, package: { ok: false, error: B.expired ? 'the ' + (B.channel || 'form') + ' approval got no answer in 7 days: expired, nothing packaged' : 'nothing was approved: no package' + (B.channel === 'Telegram' ? ' (no version passed QA)' : '') } } }];\n"
    }
   },
   {
@@ -1970,12 +1970,12 @@
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    2650,
+    4040,
     3000
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// run.json for good: the package folder and the report numbers, who approved what (or that the approval expired).\nconst { saved_at, ...S } = $('Run data: build run.json').first().json;\nconst A = $('Approval: build').first().json;\nconst B = $input.first().json;\nconst data = { ...S, qa: A.results, not_made: A.not_made, summary: A.summary, sheet: A.sheet.file,\n  sheet_token: A.sheet_token, sheet_url: A.sheet_url,\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n  approval: { status: B.expired ? 'expired' : 'done', form_url: A.form_url, submitted_at: B.submitted_at, approved: B.approved, approved_notes: B.approved_notes,\n    rejected: B.rejected, ignored: B.ignored, override_refused: B.refused, note: B.general_note },\n  package_status: B.package_status, package: B.package, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { run_id: S.run_id, summary: A.summary, package_status: B.package_status, package: B.package, approved: B.approved.length, rejected: B.rejected.length }, binary: { data: bin } }];\n"
+    "jsCode": "// run.json for good: the package folder and the report numbers, who approved what (or that the approval expired).\nconst { saved_at, ...S } = $('Run data: build run.json').first().json;\nconst A = $('Approval: build').first().json;\nconst B = $input.first().json;\nlet tgErr = null;                       // set when Telegram failed before the approval (the form took over)\ntry { tgErr = $('Telegram: failed').first().json.telegram_error || null; } catch (e) { tgErr = null; }\nconst data = { ...S, qa: A.results, not_made: A.not_made, summary: A.summary, sheet: A.sheet.file,\n  sheet_token: A.sheet_token, sheet_url: A.sheet_url,\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n  approval: { status: B.expired ? 'expired' : 'done', via: B.approver || null, channel: B.channel || null, form_url: A.form_url, submitted_at: B.submitted_at, approved: B.approved, approved_notes: B.approved_notes,\n    rejected: B.rejected, ignored: B.ignored, override_refused: B.refused, note: B.general_note },\n  telegram_error: tgErr, telegram_done: B.telegram_done || null,\n  package_status: B.package_status, package: B.package, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { run_id: S.run_id, summary: A.summary, package_status: B.package_status, package: B.package, approved: B.approved.length, rejected: B.rejected.length }, binary: { data: bin } }];\n"
    }
   },
   {
@@ -1984,7 +1984,7 @@
    "type": "n8n-nodes-base.readWriteFile",
    "typeVersion": 1.1,
    "position": [
-    2880,
+    4270,
     3000
    ],
    "parameters": {
@@ -2000,7 +2000,7 @@
    "type": "n8n-nodes-base.if",
    "typeVersion": 2.2,
    "position": [
-    3110,
+    4500,
     3000
    ],
    "parameters": {
@@ -2034,7 +2034,7 @@
    "type": "n8n-nodes-base.noOp",
    "typeVersion": 1,
    "position": [
-    3340,
+    4730,
     3100
    ],
    "parameters": {}
@@ -2045,74 +2045,11 @@
    "type": "n8n-nodes-base.stopAndError",
    "typeVersion": 1,
    "position": [
-    3340,
+    4730,
     2900
    ],
    "parameters": {
     "errorMessage": "={{ 'Package failed: ' + $json.package.error }}"
-   }
-  },
-  {
-   "id": "00000114-0000-4000-8000-000000000000",
-   "name": "Approval: Telegram sheet (disabled)",
-   "type": "n8n-nodes-base.telegram",
-   "typeVersion": 1.2,
-   "position": [
-    460,
-    3150
-   ],
-   "disabled": true,
-   "parameters": {
-    "resource": "message",
-    "operation": "sendPhoto",
-    "chatId": "={{ $env.TELEGRAM_DEMO_CHAT_ID }}",
-    "file": "={{ $('Approval: build').first().json.sheet.file }}",
-    "additionalFields": {
-     "caption": "={{ $('Approval: build').first().json.summary }}"
-    }
-   },
-   "credentials": {
-    "telegramApi": {
-     "name": "telegram-demo"
-    }
-   }
-  },
-  {
-   "id": "00000115-0000-4000-8000-000000000000",
-   "name": "Approval: Telegram send and wait (disabled)",
-   "type": "n8n-nodes-base.telegram",
-   "typeVersion": 1.2,
-   "position": [
-    690,
-    3150
-   ],
-   "disabled": true,
-   "parameters": {
-    "resource": "message",
-    "operation": "sendAndWait",
-    "chatId": "={{ $env.TELEGRAM_DEMO_CHAT_ID }}",
-    "message": "={{ $('Approval: build').first().json.summary }}",
-    "responseType": "approval",
-    "approvalOptions": {
-     "values": {
-      "approvalType": "double",
-      "approveLabel": "Approve passed",
-      "disapproveLabel": "Review"
-     }
-    },
-    "options": {
-     "limitWaitTime": {
-      "values": {
-       "resumeAmount": 7,
-       "resumeUnit": "days"
-      }
-     }
-    }
-   },
-   "credentials": {
-    "telegramApi": {
-     "name": "telegram-demo"
-    }
    }
   },
   {
@@ -2269,6 +2206,417 @@
     "options": {
      "responseCode": 404
     }
+   }
+  },
+  {
+   "id": "00000140-0000-4000-8000-000000000000",
+   "name": "Telegram: read config",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    460,
+    3130
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "/data/config/telegram.json",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   },
+   "onError": "continueErrorOutput"
+  },
+  {
+   "id": "00000141-0000-4000-8000-000000000000",
+   "name": "Telegram: chat id and texts",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    690,
+    3130
+   ],
+   "parameters": {
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\nconst esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// The chat id is the one thing kept outside the repo and outside n8n's credential: data/config/telegram.json, {\"telegram_chat_id\": \"<digits>\"}.\nconst chatIdFrom = async (ctx, input) => {\n  if (!input || !input.binary || !input.binary.data) throw new Error('config/telegram.json was not read');\n  let cfg;\n  try { cfg = JSON.parse((await ctx.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); } catch (e) { throw new Error('config/telegram.json is not valid JSON'); }\n  const id = String(cfg && cfg.telegram_chat_id != null ? cfg.telegram_chat_id : '').trim();\n  if (!/^-?\\d{1,20}$/.test(id)) throw new Error('config/telegram.json: telegram_chat_id must be digits');\n  return id;\n};\n\nconst A = $('Approval: build').first().json;\nconst RUN = String($execution.id);\nconst chat_id = await chatIdFrom(this, $input.first());\nconst passed = A.results.filter((r) => r.status === 'passed');\nconst failed = A.results.filter((r) => r.status === 'failed');\n// The photo's caption: the summary line, with as many failures as fit (Telegram allows 1024 characters), then \"+N more\".\n// Cut to length first and escape last, so a cut never splits an entity.\nlet head = A.all.length + ' versions: ' + passed.length + ' passed, ' + failed.length + ' failed';\nif (A.not_made.length) head += ', ' + A.not_made.length + ' not made';\nconst fl = failed.map((r) => r.version + ': ' + clip((r.qa.reasons || [])[0] || 'QA failed', 90));\nlet shown = [];\nconst build = (list) => head + (fl.length ? ' (' + list.join('; ') + (fl.length > list.length ? (list.length ? '; ' : '') + '+' + (fl.length - list.length) + ' more' : '') + ')' : '');\nfor (const f of fl) { if (build([...shown, f]).length > 800) break; shown = [...shown, f]; }\nconst caption = esc(clip(build(shown), 1000));\nconst ask = 'Run ' + RUN + ': ' + passed.length + ' of ' + A.all.length + ' versions passed QA. '\n  + (passed.length ? 'Approve passed puts the ' + passed.length + ' that passed in the package and rejects the rest. ' : 'Approve passed has nothing to approve (no version passed QA). ')\n  + 'Review opens the form, to tick versions and add notes.';\nconst review_text = 'Review run ' + RUN + ': tick the versions to approve, add notes, submit.\\n<a href=\"' + esc(A.form_url) + '\">Open the review form</a>';\nreturn [{ json: { chat_id, caption, ask, review_text } }];\n"
+   },
+   "onError": "continueErrorOutput"
+  },
+  {
+   "id": "00000142-0000-4000-8000-000000000000",
+   "name": "Telegram: read sheet",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    920,
+    3130
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "=/data/{{ $('Approval: build').first().json.sheet.file }}",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   },
+   "onError": "continueErrorOutput"
+  },
+  {
+   "id": "00000114-0000-4000-8000-000000000000",
+   "name": "Telegram: sheet photo",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1150,
+    3130
+   ],
+   "parameters": {
+    "resource": "message",
+    "operation": "sendPhoto",
+    "chatId": "={{ $('Telegram: chat id and texts').first().json.chat_id }}",
+    "binaryData": true,
+    "binaryPropertyName": "data",
+    "additionalFields": {
+     "caption": "={{ $('Telegram: chat id and texts').first().json.caption }}",
+     "parse_mode": "HTML",
+     "appendAttribution": false
+    }
+   },
+   "credentials": {
+    "telegramApi": {
+     "name": "telegram-demo"
+    }
+   },
+   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-000000000114",
+   "onError": "continueErrorOutput"
+  },
+  {
+   "id": "00000115-0000-4000-8000-000000000000",
+   "name": "Telegram: approve or review",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1380,
+    3130
+   ],
+   "parameters": {
+    "resource": "message",
+    "operation": "sendAndWait",
+    "chatId": "={{ $('Telegram: chat id and texts').first().json.chat_id }}",
+    "message": "={{ $('Telegram: chat id and texts').first().json.ask }}",
+    "responseType": "approval",
+    "approvalOptions": {
+     "values": {
+      "approvalType": "double",
+      "approveLabel": "Approve passed",
+      "disapproveLabel": "Review"
+     }
+    },
+    "options": {
+     "appendAttribution": false,
+     "limitWaitTime": {
+      "values": {
+       "resumeAmount": 7,
+       "resumeUnit": "days"
+      }
+     }
+    }
+   },
+   "credentials": {
+    "telegramApi": {
+     "name": "telegram-demo"
+    }
+   },
+   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-000000000115",
+   "onError": "continueRegularOutput",
+   "alwaysOutputData": true
+  },
+  {
+   "id": "00000143-0000-4000-8000-000000000000",
+   "name": "Telegram: send failed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1520,
+    3130
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ !!$json.error }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000144-0000-4000-8000-000000000000",
+   "name": "Telegram: Review pressed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    1380,
+    3270
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ !!($json.data && $json.data.approved === false) }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000145-0000-4000-8000-000000000000",
+   "name": "Telegram: review link",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1150,
+    3270
+   ],
+   "parameters": {
+    "resource": "message",
+    "operation": "sendMessage",
+    "chatId": "={{ $('Telegram: chat id and texts').first().json.chat_id }}",
+    "text": "={{ $('Telegram: chat id and texts').first().json.review_text }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "credentials": {
+    "telegramApi": {
+     "name": "telegram-demo"
+    }
+   },
+   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-000000000145",
+   "onError": "continueErrorOutput"
+  },
+  {
+   "id": "00000146-0000-4000-8000-000000000000",
+   "name": "Approval: read Telegram",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1520,
+    3270
+   ],
+   "parameters": {
+    "jsCode": "// Approve passed, pressed on Telegram: every version that passed is approved, every other one is rejected. No answer within the wait limit = expired.\nconst r = $input.first().json;\nconst A = $('Approval: build').first().json;\nconst approver = 'reviewer (Telegram)', channel = 'Telegram';\nif (!r.data || r.data.approved !== true) return [{ json: { expired: true, channel, approver, approved: [], rejected: [], ignored: [], refused: [], approved_notes: {}, general_note: '', submitted_at: null } }];\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst approved = [], rejected = [], approved_notes = {};\nfor (const v of A.all) {\n  const res = byId[v];\n  if (res && res.file && res.status === 'passed') { approved.push(v); approved_notes[v] = ''; continue; }\n  const nm = A.not_made.find((n) => n.version === v);\n  const why = nm ? 'not made: ' + nm.reason : !res ? 'not made' : res.file ? 'not approved (failed QA: ' + res.qa.reasons.join('; ') + ')' : 'failed: ' + res.qa.reasons.join('; ');\n  rejected.push({ version: v, note: why });\n}\nconst general_note = approved.length ? 'approved on Telegram' : 'nothing approved (no version passed QA)';\nreturn [{ json: { expired: false, channel, approver, approved, rejected, ignored: [], refused: [], approved_notes, general_note, submitted_at: new Date().toISOString() } }];\n"
+   }
+  },
+  {
+   "id": "00000147-0000-4000-8000-000000000000",
+   "name": "Telegram: failed",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    460,
+    3270
+   ],
+   "parameters": {
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// Telegram did not work (credential, network, chat not started, missing sheet or config): say so in run.json and go on with the form.\nconst e = $input.first().json;\nreturn [{ json: { telegram_error: clip(e.error != null ? errText(e.error) : 'Telegram step failed (no error text)', 300) } }];\n"
+   }
+  },
+  {
+   "id": "00000148-0000-4000-8000-000000000000",
+   "name": "Telegram: record error in run.json",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    690,
+    3270
+   ],
+   "parameters": {
+    "jsCode": "// run.json again, now with telegram_error (the form is the way to approve).\nconst P = $('Run: run.json (awaiting approval)').first().json;\nconst data = { ...P.run, telegram_error: $input.first().json.telegram_error, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { telegram_error: data.telegram_error, form_url: P.form_url }, binary: { data: bin } }];\n"
+   }
+  },
+  {
+   "id": "00000149-0000-4000-8000-000000000000",
+   "name": "Telegram: write run.json (error)",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    920,
+    3270
+   ],
+   "parameters": {
+    "operation": "write",
+    "fileName": "=/data/runs/{{ $execution.id }}/run.json",
+    "dataPropertyName": "data",
+    "options": {}
+   }
+  },
+  {
+   "id": "00000150-0000-4000-8000-000000000000",
+   "name": "Telegram: send done?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    2650,
+    3000
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.package_status !== 'failed' }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000151-0000-4000-8000-000000000000",
+   "name": "Telegram: done config",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    2880,
+    3000
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "/data/config/telegram.json",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000152-0000-4000-8000-000000000000",
+   "name": "Telegram: done text",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3110,
+    3000
+   ],
+   "parameters": {
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\nconst esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// The chat id is the one thing kept outside the repo and outside n8n's credential: data/config/telegram.json, {\"telegram_chat_id\": \"<digits>\"}.\nconst chatIdFrom = async (ctx, input) => {\n  if (!input || !input.binary || !input.binary.data) throw new Error('config/telegram.json was not read');\n  let cfg;\n  try { cfg = JSON.parse((await ctx.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); } catch (e) { throw new Error('config/telegram.json is not valid JSON'); }\n  const id = String(cfg && cfg.telegram_chat_id != null ? cfg.telegram_chat_id : '').trim();\n  if (!/^-?\\d{1,20}$/.test(id)) throw new Error('config/telegram.json: telegram_chat_id must be digits');\n  return id;\n};\n\n// The done message, or the \"nothing packaged\" one: run, counts, cost per asset, turnaround, package folder. Never throws.\ntry {\n  const chat_id = await chatIdFrom(this, $input.first());\n  const B = $('Telegram: send done?').first().json;\n  const run = String($('Run: state for 12b').first().json.run_id);\n  const usd = (x) => (x == null ? 'n/a' : x >= 0.01 ? '$' + x.toFixed(2) : x >= 0.001 ? '$' + x.toFixed(3) : x > 0 ? '< $0.001' : '$0.00');\n  const min = (x) => (x == null ? 'n/a' : Math.round(x * 10) / 10 + ' min');\n  let lines;\n  if (B.package_status === 'built') {\n    const rep = (B.package && B.package.report) || {};\n    lines = ['Run ' + run + ' is packaged.',\n      'Approved ' + B.approved.length + ', rejected ' + B.rejected.length + ' (' + ((B.body.approved[0] && B.body.approved[0].approver) || 'no approver') + ').',\n      'Cost per asset: ' + usd(rep.cost_per_asset_usd) + (B.body.run.mode ? ' (' + B.body.run.mode + ')' : ''),\n      'Turnaround: machine time to review-ready ' + min(rep.machine_min) + ', total ' + min(rep.turnaround_min) + '.',\n      'Package: ' + B.package.folder];\n    if (B.package.link) lines.push('Link: ' + B.package.link);\n  } else if (B.package_status === 'expired') {\n    lines = ['Run ' + run + ': the ' + (B.channel || 'form') + ' approval got no answer in 7 days. Expired, nothing packaged.'];\n  } else {\n    lines = ['Run ' + run + ': nothing approved' + (B.channel === 'Telegram' ? ' (no version passed QA)' : '') + ', no package.', 'Rejected ' + B.rejected.length + '.'];\n  }\n  return [{ json: { chat_id, text: esc(lines.join('\\n')) } }];\n} catch (e) {\n  return [{ json: { error: clip(errText(e), 300) } }];\n}\n"
+   }
+  },
+  {
+   "id": "00000153-0000-4000-8000-000000000000",
+   "name": "Telegram: done chat id?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    3340,
+    3000
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ !!$json.chat_id }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000154-0000-4000-8000-000000000000",
+   "name": "Telegram: done message",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    3570,
+    3000
+   ],
+   "parameters": {
+    "resource": "message",
+    "operation": "sendMessage",
+    "chatId": "={{ $json.chat_id }}",
+    "text": "={{ $json.text }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "appendAttribution": false,
+     "disable_web_page_preview": true
+    }
+   },
+   "credentials": {
+    "telegramApi": {
+     "name": "telegram-demo"
+    }
+   },
+   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-000000000154",
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000155-0000-4000-8000-000000000000",
+   "name": "Telegram: done result",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    3800,
+    3000
+   ],
+   "parameters": {
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// never let a bot token reach run.json or a message, whatever the API echoes back\nconst scrub = (s) => String(s == null ? '' : s).replace(/bot\\d+:[A-Za-z0-9_-]+/g, 'bot***').replace(/\\d{6,}:[A-Za-z0-9_-]{20,}/g, '***');\nconst errText = (e) => scrub(typeof e === 'string' ? e : (e && (e.description || e.message)) || 'unknown error');\n// Back to the package answer, plus what Telegram did with the message (skipped = no chat id could be read).\nconst B = $('Telegram: send done?').first().json;\nconst T = $('Telegram: done text').first().json;\nconst r = $input.first().json;\nconst why = (e) => (/^config\\/telegram\\.json/.test(e) ? 'no chat id' : clip(e, 200));       // chatIdFrom's own messages are the no-chat-id case; any other text-step failure keeps its reason\nconst telegram_done = T.error ? 'skipped: ' + why(T.error) : r.error ? 'failed: ' + clip(errText(r.error), 300) : 'sent';\nreturn [{ json: { ...B, telegram_done } }];\n"
    }
   }
  ],
@@ -3167,7 +3515,7 @@
    "main": [
     [
      {
-      "node": "Approval: form (wait up to 7 days)",
+      "node": "Telegram: read config",
       "type": "main",
       "index": 0
      }
@@ -3240,7 +3588,7 @@
    "main": [
     [
      {
-      "node": "Run: final run.json",
+      "node": "Telegram: send done?",
       "type": "main",
       "index": 0
      }
@@ -3251,7 +3599,7 @@
    "main": [
     [
      {
-      "node": "Run: final run.json",
+      "node": "Telegram: send done?",
       "type": "main",
       "index": 0
      }
@@ -3365,6 +3713,267 @@
     [
      {
       "node": "Sheet link: respond with the image",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: read config": {
+   "main": [
+    [
+     {
+      "node": "Telegram: chat id and texts",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Telegram: failed",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: chat id and texts": {
+   "main": [
+    [
+     {
+      "node": "Telegram: read sheet",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Telegram: failed",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: read sheet": {
+   "main": [
+    [
+     {
+      "node": "Telegram: sheet photo",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Telegram: failed",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: sheet photo": {
+   "main": [
+    [
+     {
+      "node": "Telegram: approve or review",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Telegram: failed",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: approve or review": {
+   "main": [
+    [
+     {
+      "node": "Telegram: send failed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: send failed?": {
+   "main": [
+    [
+     {
+      "node": "Telegram: failed",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Telegram: Review pressed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: Review pressed?": {
+   "main": [
+    [
+     {
+      "node": "Telegram: review link",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Approval: read Telegram",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: review link": {
+   "main": [
+    [
+     {
+      "node": "Approval: form (wait up to 7 days)",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Telegram: failed",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Approval: read Telegram": {
+   "main": [
+    [
+     {
+      "node": "Package: body",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: failed": {
+   "main": [
+    [
+     {
+      "node": "Telegram: record error in run.json",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: record error in run.json": {
+   "main": [
+    [
+     {
+      "node": "Telegram: write run.json (error)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: write run.json (error)": {
+   "main": [
+    [
+     {
+      "node": "Approval: form (wait up to 7 days)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: send done?": {
+   "main": [
+    [
+     {
+      "node": "Telegram: done config",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Run: final run.json",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: done config": {
+   "main": [
+    [
+     {
+      "node": "Telegram: done text",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: done text": {
+   "main": [
+    [
+     {
+      "node": "Telegram: done chat id?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: done chat id?": {
+   "main": [
+    [
+     {
+      "node": "Telegram: done message",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Telegram: done result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: done message": {
+   "main": [
+    [
+     {
+      "node": "Telegram: done result",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Telegram: done result": {
+   "main": [
+    [
+     {
+      "node": "Run: final run.json",
       "type": "main",
       "index": 0
      }
