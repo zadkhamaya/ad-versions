@@ -59,7 +59,8 @@ Answer: `{"file": "runs/r1/renders/H1_15S_9X16.mp4", "log": {...}}`. The log:
 
 - `reasons`: strings for problems that do not stop the render and should fail QA: `b-roll colour`,
   `voice-over X.X s, longer than the Y.Y s before the end card`, `captions from transcript (script alignment failed)`,
-  `crop split action in S4 (9X16)` (a beat with `face: "auto"` whose action sits in two places the crop window cannot hold together).
+  `crop split action in S4 (9X16)` (a beat with `face: "auto"` whose action sits in two places the crop window cannot hold together),
+  `crop review in S4 (9X16)` (an auto beat whose window holds under 90 % of the movement and faces: look at it).
 - `reframe` (only when a beat had `face: "auto"` and its crop window can move): `{"S4": {"9X16": {"x", "coverage", "faces", "split", "span"}}}`,
   the suggestion that was used for each such beat and format (fields as in `POST /reframe`).
 - `vo_s`, `vo_cached` (true when the voice came from this run's cache), `vo_execution_ms` (the voice job's GPU time, only
@@ -76,7 +77,8 @@ A 16:9 source cut to 9:16 (a 608 px band of 1920) or 1:1 (1080 px) needs a windo
   an even pixel (4:2:0). Default `"centre"`.
 - `x`: optional `{"9X16": 0.21, "1X1": 0.4}`, a centre per format; it wins over `face` for that format (even over `"auto"`).
 - `"auto"` has the service look at the beat for the format (`media/reframe.py`): motion that survives a blur (film grain is not
-  motion) plus detected faces (counted twice as much as all the motion), and the window goes where it covers the most. The
+  motion) plus detected faces (seen in at least a quarter of the samples, and counted twice as much as all the motion), and the
+  window goes where it covers the most, centred on that weight. **Auto follows movement and faces, not meaning: set `x` for a beat whose point is something still.** The
   suggestion is cached in `runs/<run_id>/reframe.json` by source file, beat (name and span) and format, so the other versions
   of a run, and `POST /reframe`, do not read the frames again.
 
@@ -96,18 +98,20 @@ than `"auto"`, or its `x`, is a position that was given), `formats` (`["9X16", "
 ```
 
 Answer: `{"beats": {"S1": {"9X16": {...}, "1X1": {...}}, "S4": {...}}, "sheet": "runs/r1/reframe.jpg"}`. A suggestion is
-`{"x": 0.47, "coverage": 0.99, "faces": [0.49], "split": false, "span": [0.46, 0.53]}`:
+`{"x": 0.47, "coverage": 0.99, "faces": [0.49], "split": false, "review": false, "span": [0.46, 0.53]}`:
 
 - `x`: where the window's centre should be (fraction of the width); the number to send as `face` or `x`.
 - `coverage`: the share of the motion and faces the window holds (1.0 for a still shot with no face, which is also `x` 0.5).
 - `faces`: the x centres of the faces found.
 - `split`: true when the action sits in two clusters with a gap between them (at least 25 % of it on each side of a gap of
   10 % of the width holding under 3 %) and the window covers under 85 %. `/render` adds the reason `crop split action in S4 (9X16)`.
+- `review`: true when `coverage` is under 0.90: the window misses part of the movement or faces, so look at the sheet. `/render` adds
+  the reason `crop review in S4 (9X16)`. Auto follows movement and faces, not meaning: set `x` for a beat whose point is something still.
 - `span`: the 10 to 90 % range of the action, as fractions of the width.
 
 A position that was given comes back as `{"x": 0.5, "set": true}` (the window's centre as it will be cropped). The sheet has one
 row per beat, 640 px wide: the beat's middle frame, the 9:16 window outlined in yellow and the 1:1 window in cyan, the beat name,
-a label per box (`9X16 x0.17`, or `9X16 set 0.50`) and `SPLIT` in red on a flagged beat. Beats must end inside the clip (422).
+a label per box (`9X16 x0.17`, or `9X16 set 0.50`), `SPLIT` in red on a split beat and `REVIEW` in orange on a beat to review. Beats must end inside the clip (422).
 
 ## POST /check
 

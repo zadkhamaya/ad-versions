@@ -9,7 +9,8 @@ One step is added to the measured recipe: the threshold mask is morphologically 
 isolated speckle (a still, grain-only clip gave 1-4 % of its pixel-differences, scattered over every column) while motion is
 blobs; and less than MIN_MOTION of the pixel-differences left after that is no motion at all.
 Column weights = thresholded motion counts (normalised to 1) + face boxes (normalised to 2: faces count twice all the motion).
-The window goes where it covers the most weight. A pure function of the frames it reads: no network, deterministic.
+The window goes where it covers the most weight (centred on the weight's centroid among near-equal positions); a face counts only when
+seen in several samples. A pure function of the frames it reads: no network, deterministic.
 """
 import functools
 import subprocess
@@ -19,6 +20,7 @@ import numpy as np
 
 from media import ffmpeg
 
+VERSION = 2               # bump when the recipe changes: it is part of the /render and /reframe cache key
 AW = 240                  # analysis width in px
 BLUR_SIGMA = 2.0
 STEP = 2                  # frames compared are two samples apart
@@ -33,6 +35,10 @@ SPLIT_GAP = 0.10          # ... a gap this wide (fraction of the width) ...
 SPLIT_GAP_WEIGHT = 0.03   # ... holding less than this much weight
 SPLIT_COVERAGE = 0.85     # ... and a window that covers less than this
 FACE_MERGE = 0.05         # detections closer than this (fraction of the width) are one face
+FACE_MIN_SAMPLES = 2      # a face must be seen in at least max(this, n / FACE_MIN_SHARE) samples: one stray hit is not a face
+FACE_MIN_SHARE = 4
+CENTRE_SLACK = 0.02       # a window within this much coverage of the best may be moved to centre on the weight
+REVIEW_BELOW = 0.90       # a window covering less than this is for a person to look at (the action is not all inside it)
 
 
 @functools.lru_cache(maxsize=1)
@@ -68,49 +74,55 @@ def _motion(frames):
 
 
 def _faces(frames):
-    """Face boxes (x, w) in analysis pixels, one list entry per detection over all frames."""
-    boxes = []
+    """Face boxes (x, w) in analysis pixels, a list per frame."""
+    out = []
     for f in frames:
         up = cv2.equalizeHist(cv2.resize(f, None, fx=FACE_SCALE, fy=FACE_SCALE))
-        for x, _, w, _ in _cascade().detectMultiScale(up, scaleFactor=1.1, minNeighbors=6, minSize=(30, 30)):
-            boxes.append((x / FACE_SCALE, w / FACE_SCALE))
-    return boxes
+        out.append([(x / FACE_SCALE, w / FACE_SCALE) for x, _, w, _ in
+                    _cascade().detectMultiScale(up, scaleFactor=1.1, minNeighbors=6, minSize=(30, 30))])
+    return out
 
 
-def _face_centres(boxes, aw):
-    """Distinct faces as x centres (fractions of the width): detections within FACE_MERGE of each other are one face."""
+def _persistent(per_frame, aw):
+    """(boxes, face x centres) of the faces seen in at least max(FACE_MIN_SAMPLES, samples / FACE_MIN_SHARE) samples: detections within
+    FACE_MERGE of each other (fraction of the width) are one face. A single stray hit (the cascade finds a mug now and then) is dropped."""
+    need = max(FACE_MIN_SAMPLES, len(per_frame) / FACE_MIN_SHARE)
+    hits = sorted(((x + w / 2) / aw, i, x, w) for i, boxes in enumerate(per_frame) for x, w in boxes)
     groups = []
-    for c in sorted((x + w / 2) / aw for x, w in boxes):
-        if groups and c - groups[-1][-1] < FACE_MERGE:
-            groups[-1].append(c)
+    for hit in hits:
+        if groups and hit[0] - groups[-1][-1][0] < FACE_MERGE:
+            groups[-1].append(hit)
         else:
-            groups.append([c])
-    return [round(float(np.mean(g)), 3) for g in groups]
+            groups.append([hit])
+    kept = [g for g in groups if len({h[1] for h in g}) >= need]
+    return [(h[2], h[3]) for g in kept for h in g], [round(float(np.mean([h[0] for h in g])), 3) for g in kept]
 
 
 def weights(frames, aw):
     """(column weights summing to 1 or all zero, face x centres)."""
     motion = _motion(frames)
     w = motion / motion.sum() if motion.sum() > 0 else motion
-    boxes = _faces(frames)
+    boxes, centres = _persistent(_faces(frames), aw)
     if boxes:
         face = np.zeros(aw)
         for x, bw in boxes:
             face[max(0, int(round(x))):min(aw, int(round(x + bw)))] += 1.0
         w = w + FACE_WEIGHT * face / face.sum()
     total = w.sum()
-    return (w / total if total > 0 else w), _face_centres(boxes, aw)
+    return (w / total if total > 0 else w), centres
 
 
 def best_window(w, wcols):
-    """(centre as a fraction of the width, covered share of the weight) of the wcols-wide window holding the most weight;
-    among equally good positions, the one nearest the middle of those positions."""
+    """(centre as a fraction of the width, covered share of the weight) of the wcols-wide window for the weights `w`: among the
+    positions covering within CENTRE_SLACK of the most, the one whose centre is nearest the weight's centroid (faces, counting
+    most, dominate it), so a little stray motion does not drag the subject to the window's edge. Ties: the first."""
     n = len(w)
     wcols = min(wcols, n)
     cum = np.concatenate([[0.0], np.cumsum(w)])
     cover = cum[wcols:] - cum[:n - wcols + 1]
-    best = np.flatnonzero(cover >= cover.max() - 1e-9)
-    p = int(best[np.argmin(np.abs(best - (best[0] + best[-1]) / 2))])
+    ok = np.flatnonzero(cover >= cover.max() - CENTRE_SLACK - 1e-9)
+    centroid = float((w * (np.arange(n) + 0.5)).sum() / w.sum())
+    p = int(ok[np.argmin(np.abs(ok + wcols / 2 - centroid))])
     return (p + wcols / 2) / n, float(cover[p])
 
 
@@ -151,16 +163,18 @@ def window(analysis, fmt):
     cw = ffmpeg.crop_box(sw, sh, fmt)[0]
     wcols = int(round(cw / sw * AW))
     if w.sum() <= 0 or wcols >= AW:
-        return {"x": 0.5, "coverage": 1.0, "faces": faces, "split": False, "span": span(w) if w.sum() > 0 else [0.0, 1.0]}
+        return {"x": 0.5, "coverage": 1.0, "faces": faces, "split": False, "review": False,
+                "span": span(w) if w.sum() > 0 else [0.0, 1.0]}
     x, coverage = best_window(w, wcols)
     return {"x": round(x, 4), "coverage": round(coverage, 3), "faces": faces,
-            "split": bool(coverage < SPLIT_COVERAGE and is_split(w)), "span": span(w)}
+            "split": bool(coverage < SPLIT_COVERAGE and is_split(w)), "review": bool(coverage < REVIEW_BELOW), "span": span(w)}
 
 
 def suggest(path, start, end, fmt, *, n=12):
     """Where the `fmt` crop window should sit over [start, end) of the clip at `path`:
     {"x": window centre (fraction of the width), "coverage": share of the weight inside it, "faces": [x centres],
-     "split": true when the action sits in two places the window cannot hold together, "span": [lo, hi] (the 10-90 % range)}.
+     "split": true when the action sits in two places the window cannot hold together, "review": true when the window covers under
+     REVIEW_BELOW of the action (it follows movement and faces, not meaning: a still subject has no weight), "span": [lo, hi] (the 10-90 % range)}.
     No motion and no face (a still shot): centre, coverage 1.0. A window as wide as the frame: centre."""
     return window(analyse(path, start, end, n=n), fmt)
 

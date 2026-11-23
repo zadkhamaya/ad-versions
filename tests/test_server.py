@@ -1058,7 +1058,7 @@ def test_auto_follows_the_action_logs_it_and_caches_it(auto, monkeypatch):
     j, faces = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
     assert isinstance(faces[0], float) and faces[0] < 0.35
     s = j["log"]["reframe"]["S1"]["9X16"]
-    assert s["x"] == faces[0] and not s["split"] and set(s) == {"x", "coverage", "faces", "split", "span"}
+    assert s["x"] == faces[0] and not s["split"] and set(s) == {"x", "coverage", "faces", "split", "review", "span"}
     assert j["log"]["reasons"] == [] and len(calls) == 1
     cache = json.loads((auto["run"] / "reframe.json").read_text())
     assert len(cache) == 1 and "S1" in next(iter(cache)) and "9X16" in next(iter(cache))
@@ -1071,7 +1071,53 @@ def test_auto_follows_the_action_logs_it_and_caches_it(auto, monkeypatch):
 def test_auto_split_adds_the_reason(auto, monkeypatch):
     j, faces = _auto_render(auto, monkeypatch, "split.mp4", "H1_6S_9X16")
     assert j["log"]["reframe"]["S1"]["9X16"]["split"] is True
-    assert j["log"]["reasons"] == ["crop split action in S1 (9X16)"]
+    assert j["log"]["reasons"] == ["crop split action in S1 (9X16)", "crop review in S1 (9X16)"]        # a split is also under 90 % covered
+
+
+def test_auto_review_reason_without_a_split(auto, monkeypatch):
+    from media import reframe
+    sug = {"x": 0.4, "coverage": 0.87, "faces": [], "split": False, "review": True, "span": [0.1, 0.9]}
+    monkeypatch.setattr(reframe, "suggest_formats", lambda p, s, e, fmts, **k: {f: sug for f in fmts})
+    j, faces = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
+    assert faces == [0.4] and j["log"]["reasons"] == ["crop review in S1 (9X16)"] and j["log"]["reframe"]["S1"]["9X16"]["review"] is True
+
+
+def test_a_new_recipe_version_does_not_reuse_old_suggestions(auto, monkeypatch):
+    from media import reframe
+    calls = []
+    real = reframe.analyse
+    monkeypatch.setattr(reframe, "analyse", lambda *a, **k: calls.append(a) or real(*a, **k))
+    _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
+    _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
+    assert len(calls) == 1
+    monkeypatch.setattr(reframe, "VERSION", reframe.VERSION + 1)
+    _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
+    assert len(calls) == 2
+
+
+def test_the_reframe_cache_is_locked_per_run_not_globally(auto, monkeypatch):
+    import threading
+    from media import reframe
+    server = auto["server"]
+    (auto["root"] / "runs" / "r2").mkdir()
+    shutil.copy(auto["run"] / "source.mp4", auto["root"] / "runs" / "r2" / "source.mp4")
+    inside, release, done = threading.Event(), threading.Event(), []
+
+    def slow(p, s, e, fmts, **k):
+        inside.set()
+        assert release.wait(20)
+        return {f: {"x": 0.5, "coverage": 1.0, "faces": [], "split": False, "review": False, "span": [0, 1]} for f in fmts}
+
+    monkeypatch.setattr(reframe, "suggest_formats", slow)
+    beat = server.timeline.Beat("S1", 0.0, 3.0, "", "auto")
+    t = threading.Thread(target=lambda: done.append(server._suggestions(auto["run"] / "source.mp4", auto["run"], beat, ["9X16"])))
+    t.start()
+    assert inside.wait(20)
+    monkeypatch.setattr(reframe, "suggest_formats", lambda p, s, e, fmts, **k: {f: {"x": 0.1} for f in fmts})
+    other = server._suggestions(auto["root"] / "runs" / "r2" / "source.mp4", auto["root"] / "runs" / "r2", beat, ["9X16"])      # run r2 does not wait for r1
+    assert other == {"9X16": {"x": 0.1}} and not done
+    release.set(); t.join(20)
+    assert done and done[0]["9X16"]["x"] == 0.5
 
 
 def test_auto_changes_with_the_beat_or_the_source(auto, monkeypatch):
@@ -1125,7 +1171,7 @@ def test_reframe_answers_each_beat_and_format_and_writes_a_sheet(rf):
     assert j["sheet"] == "runs/r1/reframe.jpg" and set(j["beats"]) == {"S1", "S2"}
     for beat in j["beats"].values():
         assert set(beat) == {"9X16", "1X1"}
-        assert set(beat["9X16"]) == {"x", "coverage", "faces", "split", "span"} and beat["9X16"]["x"] < 0.35 and not beat["9X16"]["split"]
+        assert set(beat["9X16"]) == {"x", "coverage", "faces", "split", "review", "span"} and beat["9X16"]["x"] < 0.35 and not beat["9X16"]["split"]
     jpg = rf["root"] / "runs/r1/reframe.jpg"
     assert jpg.read_bytes()[:2] == b"\xff\xd8" and _size(jpg) == (640, 720)
 

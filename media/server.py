@@ -39,7 +39,7 @@ def max_renders() -> int:
 
 RENDER_SLOTS = threading.BoundedSemaphore(max_renders())
 _vo_locks, _vo_guard = {}, threading.Lock()
-_reframe_lock = threading.Lock()   # runs/<id>/reframe.json is read, extended and rewritten under this
+_reframe_locks = {}                # run_id -> Lock: runs/<id>/reframe.json is read, extended and rewritten under it (the analysis runs inside it)
 _pkg_locks = {}                    # run_id -> Lock: one /package build at a time per run (a second one is a 409)
 SLOTS = ("slot1", "slot2", "slot3")
 LENGTHS = (6, 15, 30)
@@ -419,16 +419,18 @@ def _voice(req: RenderIn, run_dir: Path, work: Path, log: dict) -> Path:
 
 
 def _reframe_key(source: Path, beat, fmt: str) -> str:
-    """A suggestion is good for one source file (its path, size and mtime), one beat (name and span) and one format."""
+    """A suggestion is good for one recipe version, one source file (its path, size and mtime), one beat (name and span) and one format."""
     st = source.stat()
-    return "|".join([rel(source), str(st.st_size), str(st.st_mtime_ns), beat.name, f"{beat.start:.3f}", f"{beat.end:.3f}", fmt])
+    return "|".join([f"v{reframe.VERSION}", rel(source), str(st.st_size), str(st.st_mtime_ns), beat.name, f"{beat.start:.3f}", f"{beat.end:.3f}", fmt])
 
 
 def _suggestions(source: Path, run_dir: Path, beat, fmts) -> dict:
     """{fmt: suggestion} of a beat: from runs/<id>/reframe.json where the same source, beat and format was read before, else one pass
     over the frames for the rest (and into the cache). A cache that cannot be read is ignored."""
     path = run_dir / "reframe.json"
-    with _reframe_lock:
+    with _vo_guard:
+        lock = _reframe_locks.setdefault(run_dir.name, threading.Lock())
+    with lock:
         try:
             cache = json.loads(path.read_text())
             cache = cache if isinstance(cache, dict) else {}
@@ -447,7 +449,7 @@ def _suggestions(source: Path, run_dir: Path, beat, fmts) -> dict:
 
 def _resolve_auto(segs, beats, source: Path, run_dir: Path, fmt: str, log: dict):
     """Each source segment whose face is "auto" gets reframe.suggest's x for its beat and this format; logged under "reframe",
-    with a render-log reason when the action splits. A window as wide as the frame has nothing to place: centre, no suggestion."""
+    with a render-log reason when the action splits or the window holds under 90 % of it (review). A window as wide as the frame has nothing to place: centre, no suggestion."""
     out = []
     for s in segs:
         if s.kind != "src" or s.face != "auto":
@@ -459,9 +461,9 @@ def _resolve_auto(segs, beats, source: Path, run_dir: Path, fmt: str, log: dict)
             continue
         sug = _suggestions(source, run_dir, beats[s.beat], [fmt])[fmt]
         log.setdefault("reframe", {}).setdefault(s.beat, {})[fmt] = sug
-        if sug["split"]:
-            reason = f"crop split action in {s.beat} ({fmt})"
-            if reason not in log["reasons"]:
+        for flag in ("split", "review"):          # review: the window holds under 90 % of the action; auto follows movement, not meaning
+            reason = f"crop {flag} {'action ' if flag == 'split' else ''}in {s.beat} ({fmt})"
+            if sug.get(flag) and reason not in log["reasons"]:
                 log["reasons"].append(reason)
         out.append(dataclasses.replace(s, face=sug["x"]))
     return out
@@ -653,7 +655,7 @@ def reframe_beats(req: ReframeIn):
         todo = [f for f in req.formats if given[f] is None]
         found = _suggestions(src, run_dir, timeline.Beat(b.name, b.start, b.end, b.role, b.face), todo) if todo else {}
         answer[b.name] = {f: {"x": given[f], "set": True} if given[f] is not None else found[f] for f in req.formats}
-        rows.append({"name": b.name, "src": str(src), "t": (b.start + b.end) / 2, "split": any(found[f]["split"] for f in found),
+        rows.append({"name": b.name, "src": str(src), "t": (b.start + b.end) / 2, "split": any(found[f]["split"] for f in found), "review": any(found[f].get("review") for f in found),
                      "boxes": [{"fmt": f, "cx": answer[b.name][f]["x"], "wf": ffmpeg.crop_box(w, h, f)[0] / w, "set": given[f] is not None}
                                for f in req.formats]})
     out.parent.mkdir(parents=True, exist_ok=True)

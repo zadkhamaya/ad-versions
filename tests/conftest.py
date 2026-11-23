@@ -39,14 +39,14 @@ def beats():
     return {r[0]: Beat(*r) for r in rows}
 
 
-@pytest.fixture(scope="session")
-def reframe_clips(tmp_path_factory):
-    """Synthetic 16:9 clips (640x360, 3 s) over film grain: one bright square moving inside the left third, two squares (far left and
-    far right), and a still shot (grain only)."""
+@pytest.fixture(scope="session", params=[1, 3, 5], ids=lambda s: f"grain{s}")
+def reframe_clips(tmp_path_factory, request):
+    """Synthetic 16:9 clips (640x360, 3 s) over film grain (one of three fixed grain seeds): one bright square moving inside the left
+    third, two squares (far left and far right), and a still shot (grain only)."""
     d = tmp_path_factory.mktemp("reframe")
     grey = "color=c=0x808080:s=640x360:r=24:d=3"
     sq = "color=c=white:s=40x40:r=24:d=3"
-    grain = "noise=alls=30:allf=t:all_seed=3"       # a fixed seed: the same grain every run
+    grain = f"noise=alls=30:allf=t:all_seed={request.param}"
     enc = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"]
     left = "overlay=x='90+70*sin(2*PI*t)':y='160+40*sin(3*PI*t)'"
     right = "overlay=x='550+70*sin(2*PI*t)':y='160+40*cos(3*PI*t)'"

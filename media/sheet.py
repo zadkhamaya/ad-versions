@@ -93,7 +93,7 @@ def _label(textfile, text, x, y, colour="white", size=FONT_PX):
 
 def _reframe_row(row, tmp, n, out_png):
     """One beat: its frame at row["t"] scaled to ROW_W px wide, a box per window (centre `cx`, width `wf`, both as fractions of the
-    frame's width), the beat name, a label per box ("9X16 x0.17", or "9X16 set 0.50" for a position that was given) and SPLIT."""
+    frame's width), the beat name, a label per box ("9X16 x0.17", or "9X16 set 0.50" for a position that was given), SPLIT (red) and REVIEW (orange)."""
     vf = [f"scale={ROW_W}:-2", "setsar=1"]
     for k, b in enumerate(row["boxes"]):
         x = min(max(round((b["cx"] - b["wf"] / 2) * ROW_W), 0), ROW_W - 2 * BOX_PX)
@@ -104,7 +104,9 @@ def _reframe_row(row, tmp, n, out_png):
         vf.append(_label(os.path.join(tmp, f"box{n}_{k}.txt"), text, x + BOX_PX + 2, 30 + 22 * k, colour))
     vf.append(_label(os.path.join(tmp, f"name{n}.txt"), row["name"], 6, 6, size=20))
     if row.get("split"):
-        vf.append(_label(os.path.join(tmp, f"split{n}.txt"), "SPLIT", f"w-text_w-8", 6, "red", 20))
+        vf.append(_label(os.path.join(tmp, f"split{n}.txt"), "SPLIT", "w-text_w-8", 6, "red", 20))
+    if row.get("review"):
+        vf.append(_label(os.path.join(tmp, f"review{n}.txt"), "REVIEW", "w-text_w-8", 36 if row.get("split") else 6, "orange", 20))
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", f"{row['t']:.3f}", "-i", str(row["src"]), "-frames:v", "1", "-vf", ",".join(vf),
                     out_png], check=True, capture_output=True)
     if not os.path.exists(out_png) or os.path.getsize(out_png) == 0:
