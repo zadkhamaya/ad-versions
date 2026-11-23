@@ -6,16 +6,31 @@ import subprocess
 from media.naming import FORMATS
 
 
-def crop_filter(src_w, src_h, fmt, face):
+def crop_box(src_w, src_h, fmt):
+    """(cw, ch, y) of the crop window for `fmt` on a src_w x src_h frame: the widest/tallest window of the format's shape, centred on the cropped axis."""
     W, H = FORMATS[fmt]
     target = W / H
     if src_w / src_h > target:                      # source wider: crop width
-        cw, ch = int(round(src_h * target / 2) * 2), src_h
-        x = {"left": 0, "centre": (src_w - cw) // 2, "right": src_w - cw}[face]
-        y = 0
-    else:                                           # source taller: crop height
-        cw, ch = src_w, int(round(src_w / target / 2) * 2)
-        x, y = 0, (src_h - ch) // 2
+        return int(round(src_h * target / 2) * 2), src_h, 0
+    ch = int(round(src_w / target / 2) * 2)         # source taller: crop height
+    return src_w, ch, (src_h - ch) // 2
+
+
+def crop_x(src_w, cw, face):
+    """Left edge of a cw-wide window in a src_w-wide frame. `face`: "left" | "centre" | "right", or a number 0..1 = the window's
+    centre as a fraction of the width, clamped so the window stays inside the frame. Even (4:2:0 chroma), so the number gives an exact crop."""
+    if face == "auto":
+        raise ValueError('face "auto" must be resolved to a number (media.reframe.suggest) before the crop')
+    if isinstance(face, str):
+        return {"left": 0, "centre": (src_w - cw) // 2, "right": src_w - cw}[face]
+    x = int(round((float(face) * src_w - cw / 2) / 2) * 2)
+    return max(0, min(src_w - cw, x))
+
+
+def crop_filter(src_w, src_h, fmt, face):
+    W, H = FORMATS[fmt]
+    cw, ch, y = crop_box(src_w, src_h, fmt)
+    x = crop_x(src_w, cw, face) if cw < src_w else 0     # a window as wide as the frame has nowhere to move
     return f"crop={cw}:{ch}:{x}:{y},scale={W}:{H},setsar=1"
 
 

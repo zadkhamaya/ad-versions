@@ -15,7 +15,7 @@ import threading
 import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Literal, Optional, Union
+from typing import Annotated, Literal, Optional, Union
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -118,12 +118,18 @@ def rel(path: Path) -> str:
 
 # ---- request models ----
 
+Fraction = Annotated[float, Field(ge=0, le=1, allow_inf_nan=False)]
+
+
 class BeatIn(BaseModel):
+    """face: left | centre | center | right | auto, or a number 0..1 (the crop window's centre as a fraction of the source width).
+    x: a per-format centre ({"9X16": 0.2, "1X1": 0.4}) that wins over `face` for that format."""
     name: str = Field(min_length=1, max_length=20)
     start: float = Field(ge=0, allow_inf_nan=False)
     end: float = Field(allow_inf_nan=False)
     role: str = ""
-    face: Literal["left", "centre", "right"] = "centre"
+    face: Union[Literal["left", "centre", "right", "auto"], Fraction] = "centre"
+    x: Optional[dict[Literal["9X16", "1X1"], Fraction]] = None
 
     @field_validator("face", mode="before")
     @classmethod
@@ -350,12 +356,12 @@ def _prepare(req: RenderIn):
     past = [b.name for b in req.beats if b.end > src_s + 0.05]
     if past:
         raise HTTPException(422, f"beat(s) {', '.join(past)} end after the source clip's {src_s:.2f} s")
-    beats = {b.name: timeline.Beat(b.name, b.start, b.end, b.role, b.face) for b in req.beats}
+    beats = {b.name: timeline.Beat(b.name, b.start, b.end, b.role, b.face, dict(b.x or {})) for b in req.beats}
     missing = [n for n in edit[hook][length_s] if not n.startswith("slot") and n not in beats]
     if missing:
         raise HTTPException(422, f"beats missing for {req.version}: {', '.join(missing)}")
     try:
-        segs = timeline.plan(beats, str(inputs[0]), inputs[1], hook, length_s, edit, fps=FPS)
+        segs = timeline.plan(beats, str(inputs[0]), inputs[1], hook, length_s, edit, fps=FPS, fmt=fmt)
     except ValueError as e:
         raise HTTPException(422, str(e)) from None
     try:

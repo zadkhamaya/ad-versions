@@ -83,3 +83,10 @@ def test_a_beat_that_would_get_no_frames_is_refused():
         plan(beats, "s.mp4", {"slot1": "b.mp4"}, "H1", 15, EDIT)
     beats["S5"] = Beat("S5", 15, 20.0, "", "centre")
     assert total(plan(beats, "s.mp4", {"slot1": "b.mp4"}, "H1", 15, EDIT)) == 13.5
+
+def test_a_per_format_x_wins_over_the_beats_face(beats):
+    from dataclasses import replace
+    b = dict(beats, S1=replace(beats["S1"], face=0.8, x={"9X16": 0.21}))
+    first = lambda fmt: plan(b, "src.mp4", BROLL, "H1", 6, EDIT, fmt=fmt)[0].face
+    assert first("9X16") == 0.21 and first("1X1") == 0.8 and first(None) == 0.8
+    assert plan(b, "src.mp4", BROLL, "H1", 6, EDIT, fmt="9X16")[0].beat == "S1"

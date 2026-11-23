@@ -992,3 +992,34 @@ def test_the_package_lock_is_held_through_the_upload(env, monkeypatch):
     assert first == [200]
     monkeypatch.setattr(package, "s3_client_from_env", lambda: FakeS3())
     assert env["client"].post("/package", json=b).status_code == 200                       # released afterwards
+
+
+# ---- Task 6c: crop positions ----
+
+def _faces_seen(env, monkeypatch, version, mutate):
+    seen = {}
+    monkeypatch.setattr(ffmpeg, "render_picture", lambda segs, fmt, *a, **k: seen.update(segs=segs) or (_ for _ in ()).throw(RuntimeError("stop")))
+    b = body(version)
+    mutate(b)
+    r = env["client"].post("/render", json=b)
+    assert r.status_code == 500 and r.json()["error"] == "RuntimeError: stop", r.text
+    return [s.face for s in seen["segs"] if s.kind == "src"]
+
+
+def test_face_takes_a_number_and_x_wins_per_format(env, monkeypatch):
+    def mutate(b):
+        b["beats"][0]["face"] = 0.21
+        b["beats"][0]["x"] = {"9X16": 0.7}
+    assert _faces_seen(env, monkeypatch, "H1_6S_9X16", mutate) == [0.7]
+    assert _faces_seen(env, monkeypatch, "H1_6S_1X1", mutate) == [0.21]
+    assert _faces_seen(env, monkeypatch, "H1_6S_16X9", mutate) == [0.21]
+
+
+def test_face_numbers_must_be_a_fraction(env):
+    c = env["client"]
+    for bad in (1.5, -0.1, "middle"):
+        b = body(); b["beats"][0]["face"] = bad
+        assert c.post("/render", json=b).status_code == 422, bad
+    for bad in ({"9X16": 1.2}, {"9X16": -1}, {"4X5": 0.5}, {"16X9": 0.5}, {"9X16": "left"}, 0.5):
+        b = body(); b["beats"][0]["x"] = bad
+        assert c.post("/render", json=b).status_code == 422, bad

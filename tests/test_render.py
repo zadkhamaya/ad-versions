@@ -62,3 +62,32 @@ def test_threads_cap_is_opt_in(media, beats, tmp_path):
     assert "-threads" not in default
     i = capped.index("-threads")
     assert capped[i + 1] == "1" and i < capped.index(str(tmp_path / "b.mp4"))
+
+
+def _x(src_w, src_h, fmt, face):
+    return int(crop_filter(src_w, src_h, fmt, face).split(":")[2])
+
+def test_crop_position_is_the_windows_centre_as_a_fraction_of_the_width():
+    # 9X16 window 608 px, 1X1 window 1080 px, source 1920 px; the offset is even (4:2:0 chroma)
+    assert [_x(1920, 1080, "9X16", f) for f in (0.0, 0.21, 0.5, 1.0)] == [0, 100, 656, 1312]
+    assert [_x(1920, 1080, "1X1", f) for f in (0.0, 0.21, 0.5, 1.0)] == [0, 0, 420, 840]
+    assert _x(1920, 1080, "1X1", 0.4) == 228
+    assert crop_filter(1920, 1080, "9X16", 0.21).startswith("crop=608:1080:100:0,scale=1080:1920")
+
+def test_a_position_that_would_leave_the_frame_is_clamped():
+    assert _x(1920, 1080, "9X16", 0.05) == 0 and _x(1920, 1080, "9X16", 0.97) == 1312
+    assert _x(1920, 1080, "1X1", 0.99) == 840
+
+def test_a_number_equal_to_the_named_positions_gives_the_same_crop():
+    assert _x(1920, 1080, "9X16", 0.5) == _x(1920, 1080, "9X16", "centre")
+    assert _x(1920, 1080, "9X16", 304 / 1920) == _x(1920, 1080, "9X16", "left")
+    assert _x(1920, 1080, "9X16", 1 - 304 / 1920) == _x(1920, 1080, "9X16", "right")
+
+def test_a_16x9_output_from_a_16x9_source_ignores_the_position():
+    for f in ("left", "right", 0.0, 1.0):
+        assert crop_filter(1920, 1080, "16X9", f).startswith("crop=1920:1080:0:0")
+
+def test_auto_must_be_resolved_before_the_crop():
+    import pytest
+    with pytest.raises(ValueError, match="auto"):
+        crop_filter(1920, 1080, "9X16", "auto")

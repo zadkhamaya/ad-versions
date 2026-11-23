@@ -1,5 +1,5 @@
 """timeline.py — which source and b-roll seconds go where in one version (config/edit.yaml)."""
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -11,7 +11,8 @@ class Beat:
     start: float
     end: float
     role: str
-    face: str
+    face: "str | float"                      # left | centre | right | auto, or a number 0..1: the crop window's centre
+    x: dict = field(default_factory=dict)    # per-format centre ({"9X16": 0.2, "1X1": 0.4}): wins over `face` for that format
 
 
 @dataclass(frozen=True)
@@ -20,9 +21,10 @@ class Segment:
     path: str
     start: float
     dur: float
-    face: str
+    face: "str | float"
     grade: str = ""    # ffmpeg filter chain after the crop (b-roll only; from media/match.py)
     slot: str = ""     # the edit slot a b-roll segment fills
+    beat: str = ""     # the beat a source segment is cut from
 
 
 def load_edit(path, fps=24):
@@ -36,7 +38,7 @@ def load_edit(path, fps=24):
     return edit
 
 
-def plan(beats, source, broll, hook, length_s, edit, *, fps=24):
+def plan(beats, source, broll, hook, length_s, edit, *, fps=24, fmt=None):
     order = [e for e in edit[hook][length_s] if not e.startswith("slot") or e in broll]
     cut = float(edit["cutaway_s"])
     need_src = round(length_s - float(edit["endcard_s"]) - cut * sum(e.startswith("slot") for e in order), 3)
@@ -58,6 +60,6 @@ def plan(beats, source, broll, hook, length_s, edit, *, fps=24):
             out.append(Segment("broll", broll[e], 0.0, cut, "centre", slot=e))
         else:
             b = beats[e]
-            out.append(Segment("src", source, b.start, durs[i], b.face))
+            out.append(Segment("src", source, b.start, durs[i], b.x.get(fmt, b.face), beat=b.name))
             i += 1
     return out
