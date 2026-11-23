@@ -41,7 +41,6 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   const c0 = L.clips[0];
   ok(c0.prompt === 'a dim bedroom at night, curtains moving slightly, no people, warm lamp light, deep blue shadows, shallow depth of field, fine grain, 24 fps, no people, no text', 'plan: prompt = shot + look line + suffix: ' + c0.prompt);
   ok(L.clips.every((c) => /^[A-Za-z0-9]{1,16}$/.test(c.clip) && c.prompt.length <= 2000 && Number.isInteger(c.seed) && c.seed >= 0 && c.seed < 2 ** 31 && ((c.w === 1344 && c.h === 768) || (c.w === 768 && c.h === 1344))), 'plan: ids, prompts, seeds and sizes fit /api/broll');
-  ok(L.pod_deadline_ms - L.started_ms === 30 * 60000, 'plan: 30-minute pod limit');
   const S2 = Sbase(); S2.hooks[0].broll[1] = null; S2.look = { line: '', source: 'fallback' };
   const p2 = (await planOut(S2)).live;
   ok(p2.clips.length === 10 && !p2.clips.some((c) => c.clip === 'H1B') && p2.clips[0].prompt.endsWith('no people, no text') && !p2.clips[0].prompt.includes(',,'), 'plan: a dropped shot is not asked for; an empty look line leaves no gap');
@@ -53,46 +52,59 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   // ---- pod decision
   const now = Date.now();
   const VM = (o = {}) => ({ name: 'swarm-pod-test', kind: 'pod', state: 'ready', bundles: ['h3-t2v'], bundles_started: ['h3-t2v'], add_queue: [], snapshot: { picker: { download: 'done' } }, rate: 0.43, final_price_hr: null, launched_at: Math.floor(now / 1000) - 600, ...o });
-  const dec = async (resp, { prev = null, late = false } = {}) => {
+  // sent: this run's deploy result exists (the pod it deployed is named in it)
+  const dec = async (resp, { sent = false, late = false } = {}) => {
     const l = clone(L); if (late) l.pod_deadline_ms = now - 1;
-    const nodes = { [P + 'plan']: { live: l } }; if (prev) nodes[P + 'wait for the pod'] = prev;
+    const nodes = { [P + 'plan']: { live: l } }; if (sent) nodes[P + 'deploy result'] = { live: l, next: 'wait', pod_name: 'swarm-pod-test' };
     return (await run(wf, P + 'pod decision', { nodes, input: resp }))[0].json;
   };
   const okr = (body) => ({ statusCode: 200, body: { configured: true, missing: [], ...body } });
+  ok(L.pod_deadline_ms - L.started_ms === 45 * 60000, 'plan: 45-minute pod limit (spec section 12 wins over the brief)');
   let d = await dec(okr({ vm: null }));
-  ok(d.next === 'deploy' && !d.deploy_sent, 'decision: no pod -> deploy');
-  ok(/gone from the Pods page/.test(await throws(dec(okr({ vm: null }), { prev: { deploy_sent: true } }))), 'decision: after a deploy, a vanished pod is an error (no redeploy loop)');
-  for (const st of ['launching', 'booting', 'setting_up', 'starting', 'deleting']) { d = await dec(okr({ vm: VM({ state: st }) })); ok(d.next === 'wait', 'decision: ' + st + ' -> wait'); }
-  d = await dec(okr({ vm: VM({ state: 'launching' }) }), { prev: { deploy_sent: true } });
-  ok(d.next === 'wait' && d.deploy_sent === true, 'decision: the deploy flag rides along through the waits');
-  d = await dec(okr({ vm: VM() }));
-  ok(d.next === 'ready' && d.live.pod.name === 'swarm-pod-test' && d.live.pod.rate_usd_h === 0.43 && d.live.pod.by_this_run === false, 'decision: a ready pod with its bundles is reused (not by this run): ' + JSON.stringify(d.live.pod));
-  d = await dec(okr({ vm: VM({ final_price_hr: 0.39 }) }), { prev: { deploy_sent: true } });
-  ok(d.next === 'ready' && d.live.pod.rate_usd_h === 0.39 && d.live.pod.by_this_run === true, 'decision: the final price wins; a pod deployed here is marked');
-  d = await dec(okr({ vm: VM({ launched_at: Math.floor(now / 1000) + 5 }) }));
-  ok(d.live.pod.by_this_run === true, 'decision: launched after this run began = ours');
-  ok((await dec(okr({ vm: VM({ add_queue: [{ kind: 'bundles', names: ['h3-t2v'] }], bundles_started: [] }) }))).next === 'wait', 'decision: ready but bundles queued -> wait');
-  ok((await dec(okr({ vm: VM({ snapshot: { picker: { download: 'running' } } }) }))).next === 'wait', 'decision: download running -> wait');
-  ok((await dec(okr({ vm: VM({ snapshot: { picker: { download: 'idle' } } }) }))).next === 'wait', 'decision: a started bundle with no "done" yet -> wait');
-  ok(/bundle download failed/.test(await throws(dec(okr({ vm: VM({ snapshot: { picker: { download: 'failed: disk full' } } }) })))), 'decision: a failed download stops the run');
-  ok(/h3-t2v/.test(await throws(dec(okr({ vm: VM({ bundles: ['h3-swap'], bundles_started: [] }) })))), 'decision: a pod without h3-t2v stops the run');
-  ok(/build host/.test(await throws(dec(okr({ vm: VM({ kind: 'build' }) })))), 'decision: a build host is never used');
-  ok(/failed its setup/.test(await throws(dec(okr({ vm: VM({ state: 'setup_failed', step: 'pull', setup_error: 'no disk' }) })))), 'decision: setup_failed stops the run with the reason');
+  ok(d.next === 'deploy', 'decision: no pod -> deploy');
+  for (const vm of [VM(), VM({ state: 'booting' }), VM({ state: 'deleting' }), VM({ kind: 'build', name: 'swarm-build-x', state: 'ready' }), VM({ state: 'ready', held: { holder: 'Swap' } }), VM({ bundles: ['h3-swap'] })]) {
+    const m = await throws(dec(okr({ vm })));
+    ok(m === 'A GPU pod is already running (' + vm.name + ', ' + vm.state + '). Delete it on the Pods page or choose B-roll: stand-in.', 'decision: a pod found before our deploy (' + vm.name + ', ' + vm.state + ') is never used: ' + m.slice(0, 40));
+  }
+  for (const st of ['launching', 'booting', 'setting_up', 'starting']) { d = await dec(okr({ vm: VM({ state: st }) }), { sent: true }); ok(d.next === 'wait' && d.live.pod.name === 'swarm-pod-test', 'decision: our pod ' + st + ' -> wait'); }
+  d = await dec(okr({ vm: VM({ final_price_hr: 0.39 }) }), { sent: true });
+  ok(d.next === 'ready' && d.live.pod.rate_usd_h === 0.39 && !('by_this_run' in d.live.pod), 'decision: our ready pod, the final price wins, no ownership guess in the state');
+  d = await dec(okr({ vm: VM() }), { sent: true });
+  ok(d.next === 'ready' && d.live.pod.rate_usd_h === 0.43, 'decision: ready with its bundles done -> ready');
+  ok((await dec(okr({ vm: VM({ add_queue: [{ kind: 'bundles', names: ['h3-t2v'] }], bundles_started: [] }) }), { sent: true })).next === 'wait', 'decision: ready but bundles queued -> wait');
+  ok((await dec(okr({ vm: VM({ snapshot: { picker: { download: 'running' } } }) }), { sent: true })).next === 'wait', 'decision: download running -> wait');
+  ok((await dec(okr({ vm: VM({ snapshot: { picker: { download: 'idle' } } }) }), { sent: true })).next === 'wait', 'decision: a started bundle with no "done" yet -> wait');
+  d = await dec(okr({ vm: VM({ snapshot: { picker: { download: 'failed: disk full' } } }) }), { sent: true });
+  ok(d.next === 'give_up' && /^no pod: a bundle download failed/.test(d.reason), 'decision: a failed download gives up (no b-roll): ' + d.reason);
+  d = await dec(okr({ vm: VM({ state: 'setup_failed', step: 'pull', setup_error: 'no disk' }) }), { sent: true });
+  ok(d.next === 'give_up' && /^no pod: the pod swarm-pod-test failed its setup \(pull: no disk\)/.test(d.reason), 'decision: setup_failed gives up');
+  d = await dec(okr({ vm: VM({ state: 'booting' }) }), { sent: true, late: true });
+  ok(d.next === 'give_up' && d.reason === 'no pod: the pod was not ready after 45 minutes (the pod swarm-pod-test is booting)' && d.live.pod.name === 'swarm-pod-test', 'decision: not ready in 45 minutes -> give up, with the pod named for the delete');
+  d = await dec(okr({ vm: VM({ snapshot: { picker: { download: 'running' } } }) }), { sent: true, late: true });
+  ok(d.next === 'give_up' && /bundles are downloading/.test(d.reason), 'decision: bundles still downloading at 45 minutes -> give up');
+  ok(/gave no GPU pod in 45 minutes/.test(await throws(dec({ error: { message: 'x' } }, { late: true }))), 'decision: nothing deployed and the toolkit silent for 45 minutes is an error, not a give-up');
+  ok(/is being deleted/.test(await throws(dec(okr({ vm: VM({ state: 'deleting' }) }), { sent: true }))), 'decision: our pod deleting stops at once');
+  ok(/is gone from the Pods page/.test(await throws(dec(okr({ vm: null }), { sent: true }))), 'decision: our pod vanished stops at once (no redeploy)');
+  ok(/is not the one this run deployed \(swarm-pod-test\)/.test(await throws(dec(okr({ vm: VM({ name: 'swarm-pod-other' }) }), { sent: true }))), 'decision: a different pod after our deploy stops');
   ok(/not configured/.test(await throws(dec({ statusCode: 200, body: { configured: false, missing: ['MASSED_API_KEY'], vm: null } }))), 'decision: unconfigured toolkit');
   ok(/refused the machine token/.test(await throws(dec({ statusCode: 401, body: { error: 'Sign in again.' } }))), 'decision: 401');
-  ok((await dec({ error: { message: 'ECONNRESET' } })).next === 'wait' && (await dec({ statusCode: 502, body: {} })).next === 'wait', 'decision: a hiccup waits and asks again');
-  ok(/not ready after 30 minutes \(the pod swarm-pod-test is booting/.test(await throws(dec(okr({ vm: VM({ state: 'booting' }) }), { late: true }))), 'decision: 30 minutes is the limit');
-  ok(cond(wf, P + 'pod ready?')({}, { next: 'ready' }) && !cond(wf, P + 'pod ready?')({}, { next: 'wait' }) && cond(wf, P + 'deploy needed?')({}, { next: 'deploy' }) && !cond(wf, P + 'deploy needed?')({}, { next: 'wait' }), 'decision: the two IFs read next');
+  ok((await dec({ error: { message: 'ECONNRESET' } })).next === 'wait' && (await dec({ statusCode: 502, body: {} }, { sent: true })).next === 'wait', 'decision: a hiccup waits and asks again');
+  const gu = cond(wf, P + 'give up?'), pr0 = cond(wf, P + 'pod ready?'), dn0 = cond(wf, P + 'deploy needed?');
+  ok(gu({}, { next: 'give_up' }) && !gu({}, { next: 'wait' }) && pr0({}, { next: 'ready' }) && !pr0({}, { next: 'wait' }) && dn0({}, { next: 'deploy' }) && !dn0({}, { next: 'wait' }), 'decision: the three IFs read next');
 
-  // ---- catalog and deploy
-  const decOut = { live: L, next: 'deploy', deploy_sent: false };
+  // ---- catalog, pod.json and deploy
+  const decOut = { live: L, next: 'deploy' };
   const cat = (r) => run(wf, P + 'catalog check', { nodes: { [P + 'pod decision']: decOut }, input: r });
   ok((await cat({ statusCode: 200, body: { bundles: [{ name: 'h3-swap' }, { name: 'h3-t2v' }] } }))[0].json.next === 'deploy', 'catalog: h3-t2v listed -> carry on');
   ok(/does not list the h3-t2v bundle \(1 bundles listed; lists error: old/.test(await throws(cat({ statusCode: 200, body: { bundles: [{ name: 'h3-swap' }], lists: { error: 'old' } } }))), 'catalog: not listed -> stop');
-  ok(/refresh failed \(500\)/.test(await throws(cat({ statusCode: 500, body: { error: 'x' } }))) && /refresh failed/.test(await throws(cat({ statusCode: 200, body: { bundles: null } }))) === false, 'catalog: errors stop (a null bundle list is "not listed")');
-  const dep = (r) => run(wf, P + 'deploy result', { nodes: { [P + 'pod decision']: decOut }, input: r });
-  const dd = (await dep({ statusCode: 202, body: { vm: { name: 'swarm-pod-x' } } }))[0].json;
-  ok(dd.deploy_sent === true && dd.next === 'wait' && dd.live.clips.length === 12, 'deploy: 202 -> wait, flag set');
+  ok(/refresh failed \(500\)/.test(await throws(cat({ statusCode: 500, body: { error: 'x' } }))), 'catalog: errors stop');
+  const pq = (await run(wf, P + 'pod request', { input: decOut }))[0];
+  const pqd = JSON.parse(pq.binary.data.text);
+  ok(pq.binary.data.name === 'pod.json' && /^\d{4}-\d\d-\d\dT/.test(pqd.requested_at) && pqd.requested_ms > 0 && !('name' in pqd) && pq.json.pod_request.requested_ms === pqd.requested_ms, 'pod.json (before the deploy): requested_at only');
+  const dep = (r) => run(wf, P + 'deploy result', { nodes: { [P + 'pod decision']: decOut, [P + 'pod request']: pq.json }, input: r });
+  const dd = (await dep({ statusCode: 202, body: { vm: { name: 'swarm-pod-x' } } }))[0];
+  const ddj = JSON.parse(dd.binary.data.text);
+  ok(dd.json.pod_name === 'swarm-pod-x' && dd.json.next === 'wait' && dd.json.live.clips.length === 12 && ddj.name === 'swarm-pod-x' && ddj.requested_ms === pqd.requested_ms, 'deploy: 202 -> pod.json now names the pod and keeps requested_at');
   ok(/refused to deploy.*409.*premium A6000 is out of stock: ask the owner/.test(await throws(dep({ statusCode: 409, body: { error: 'No Premium A6000 is free', confirm: 'plain' } }))), 'deploy: the plain-A6000 question is the owner\'s');
   ok(/pod address could not be probed/.test(await throws(dep({ statusCode: 409, body: { error: 'Can\'t tell', confirm: 'tunnel' } }))) && /refused to deploy the GPU pod \(409\): The Massed balance/.test(await throws(dep({ statusCode: 409, body: { error: 'The Massed balance $1.00 is under 2 h' } }))), 'deploy: other refusals carry the toolkit\'s words');
   const depNode = node(wf, P + 'POST /api/pods/deploy');
@@ -108,6 +120,11 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   const sub = (r, n = nb) => run(wf, P + 'submit result', { nodes: { [P + 'next batch']: n }, input: r });
   let sr = (await sub({ statusCode: 202, body: { id: '0123456789ab' } }))[0].json;
   ok(sr.accepted && sr.live.job.id === '0123456789ab' && sr.live.jobs.length === 1 && cond(wf, P + 'job accepted?')({}, sr), 'submit: 202 -> job recorded');
+  ok(sr.live.submit_until_ms === null, 'submit: a 202 resets the resubmit window (the next job gets a fresh 30 minutes)');
+  const stale = clone(nb); stale.live.submit_until_ms = Date.now() - 1;           // the first job took over 30 minutes
+  const afterAccept = (await sub({ statusCode: 202, body: { id: '0123456789ab' } }, stale))[0].json;
+  const nb2 = (await run(wf, P + 'next batch', { input: { live: afterAccept.live } }))[0].json;
+  ok(nb2.live.submit_until_ms > Date.now() + 29 * 60000, 'submit: a retry job after a long first job gets a fresh window, so one transient 409 does not throw the run away');
   sr = (await sub({ statusCode: 409, body: { error: 'The pod is still setting up its bundles.', retry: true } }))[0].json;
   ok(!sr.accepted && sr.live.submit_waits === 1 && sr.live.clips.every((c) => c.tries === 0) && !cond(wf, P + 'job accepted?')({}, sr), 'submit: 409 retry:true -> wait and ask again, nothing counted');
   const lateNb = clone(nb); lateNb.live.submit_until_ms = Date.now() - 1;
@@ -181,13 +198,13 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   const nothing = (await run(wf, P + 'after downloads', { nodes: { [P + 'poll result']: { live: clone(L), running: false, fetch: [] } }, input: { live: clone(L), running: false, fetch: [] } }))[0].json;
   ok(nothing.live.job === null && nothing.live.clips.every((c) => c.status === 'pending'), 'after: nothing to fetch passes the state on');
 
-  // ---- finish and done
+  // ---- finish, the own-pod check and done
   const allDone = clone(L); allDone.clips.forEach((c, i) => { c.status = 'done'; c.file = 'runs/77/broll/' + c.clip + '_' + c.size + '.mp4'; c.wall_s = 20 + i; c.tries = 1; });
-  allDone.pod = { name: 'swarm-pod-test', product: 'gpu_1x_a6000_high_ram', rate_usd_h: 0.4275, launched_at: Math.floor((Date.now() - 25 * 60000) / 1000), by_this_run: true };
+  allDone.pod = { name: 'swarm-pod-test', product: 'gpu_1x_a6000_high_ram', rate_usd_h: 0.4275, launched_at: Math.floor((Date.now() - 25 * 60000) / 1000) };
   const fn = async (live, S = Sbase()) => (await run(wf, P + 'finish', { nodes: { 'Look: ready': S }, input: { live } }))[0].json;
   let f = await fn(allDone);
   ok(f.result.files.length === 12 && Object.keys(f.result.slots.H1).join() === 'slot1,slot2,slot3' && f.result.slots.H1.slot2.wide === 'runs/77/broll/H1B_1344x768.mp4' && f.result.slots.H2.slot3.tall === 'runs/77/broll/H2C_768x1344.mp4' && f.result.notes.length === 0 && f.result.clips.H1A.wide_wall_s === 20, 'finish: 12 files, A->slot1 B->slot2 C->slot3, per-clip times');
-  const part = clone(allDone); part.clips.find((c) => c.clip === 'H1B' && c.size === '768x1344').status = 'dropped'; part.clips.find((c) => c.clip === 'H1B' && c.size === '768x1344').reason = 'clip H1B 768x1344: oom'; delete part.clips.find((c) => c.clip === 'H1B' && c.size === '768x1344').file;
+  const part = clone(allDone); const pc = part.clips.find((c) => c.clip === 'H1B' && c.size === '768x1344'); pc.status = 'dropped'; pc.reason = 'clip H1B 768x1344: oom'; delete pc.file;
   f = await fn(part);
   ok(!('slot2' in f.result.slots.H1) && 'slot3' in f.result.slots.H1 && f.result.notes.length === 1 && /H1B: no cutaway \(clip H1B 768x1344: oom\)/.test(f.result.notes[0]) && f.result.files.length === 11, 'finish: one size missing -> the slot is left out and the note says why');
   const none = clone(allDone); none.clips.forEach((c) => { c.status = 'dropped'; c.reason = 'x'; });
@@ -195,16 +212,34 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   const S4 = Sbase(); S4.hooks[1].broll = [null, null, null]; const l4 = clone(allDone); l4.clips = l4.clips.filter((c) => c.clip.startsWith('H1'));
   f = await fn(l4, S4);
   ok(Object.keys(f.result.slots.H2).length === 0 && Object.keys(f.result.slots.H1).length === 3 && f.result.notes.length === 0, 'finish: a hook with no shots has no slots and no note');
-  const dn = (r, live = allDone) => run(wf, P + 'done', { nodes: { [P + 'finish']: { live, result: f.result }, 'Look: ready': Sbase() }, input: r });
+  const gl = clone(L); gl.pod = { name: 'swarm-pod-test', rate_usd_h: 0.43, launched_at: Math.floor(Date.now() / 1000) - 2700 };
+  const gv = (await run(wf, P + 'finish', { nodes: { 'Look: ready': Sbase() }, input: { live: gl, next: 'give_up', reason: 'no pod: the pod was not ready after 45 minutes (x)' } }))[0].json;
+  ok(gv.live.status.startsWith('no pod: ') && gv.result.files.length === 0 && Object.keys(gv.result.slots.H1).length === 0 && Object.keys(gv.result.slots.H2).length === 0 && /^no b-roll: no pod/.test(gv.result.notes[0]), 'finish: give up = every slot empty, the status and a note');
+  // the own-pod check before the delete
   f = await fn(allDone);
-  const dn1 = (await run(wf, P + 'done', { nodes: { [P + 'finish']: f, 'Look: ready': Sbase() }, input: { statusCode: 200, body: { vm: { uptime_s: 1620, cost: 0.855 } } } }))[0].json;
-  ok(dn1.broll.mode === 'live' && dn1.broll.gpu_minutes === 27 && dn1.broll.gpu_rate_usd_h === 0.4275 && dn1.broll.pod_delete === 'deleted' && dn1.broll.gpu_cost_per_toolkit_usd === 0.855 && dn1.broll.files.length === 12 && dn1.slots.H1.slot1.wide.endsWith('H1A_1344x768.mp4') && dn1.run_id === '77' && dn1.broll.pod.name === 'swarm-pod-test', 'done: GPU minutes from the pod\'s uptime, rate from the pod, same state shape as the stand-in');
-  const reused = clone(allDone); reused.pod.by_this_run = false; reused.started_ms = Date.now() - 6 * 60000;
-  const dn2 = (await run(wf, P + 'done', { nodes: { [P + 'finish']: { live: reused, result: f.result }, 'Look: ready': Sbase() }, input: { statusCode: 200, body: { vm: { uptime_s: 99999 } } } }))[0].json;
-  ok(dn2.broll.gpu_minutes >= 5.9 && dn2.broll.gpu_minutes <= 6.2, 'done: a reused pod counts only this run\'s time: ' + dn2.broll.gpu_minutes);
-  const dn3 = (await run(wf, P + 'done', { nodes: { [P + 'finish']: f, 'Look: ready': Sbase() }, input: { statusCode: 409, body: { error: 'There is no pod.' } } }))[0].json;
-  ok(/already gone/.test(dn3.broll.pod_delete), 'done: a pod already gone is fine');
-  ok(/could not be deleted \(500: boom\)/.test(await throws(run(wf, P + 'done', { nodes: { [P + 'finish']: f, 'Look: ready': Sbase() }, input: { statusCode: 500, body: { error: 'boom' } } }))) && /could not be deleted \(409: Not now: the pod is setting_up/.test(await throws(run(wf, P + 'done', { nodes: { [P + 'finish']: f, 'Look: ready': Sbase() }, input: { statusCode: 409, body: { error: 'Not now: the pod is setting_up.' } } }))), 'done: a delete that failed stops the run (the error workflow tries again and tells Geoff)');
+  const opc = async (resp, fin = f) => (await run(wf, P + 'own pod check', { nodes: { [P + 'finish']: fin }, input: resp }))[0].json;
+  const podView = (o = {}) => ({ name: 'swarm-pod-test', kind: 'pod', state: 'ready', uptime_s: 1620, cost: 0.4275, actions: { delete: true }, ...o });
+  let oc = await opc({ statusCode: 200, body: { vm: podView() } });
+  ok(oc.delete === true && cond(wf, P + 'delete the pod?')({}, oc), 'own pod check: the pod this run deployed is deleted');
+  oc = await opc({ statusCode: 200, body: { vm: podView({ name: 'swarm-pod-owner' }) } });
+  ok(oc.delete === false && /^left alone: swarm-pod-owner is not the pod this run deployed/.test(oc.pod_delete) && !cond(wf, P + 'delete the pod?')({}, oc), 'own pod check: any other pod is left alone');
+  oc = await opc({ statusCode: 200, body: { vm: null } });
+  ok(oc.delete === false && oc.pod_delete === 'already gone', 'own pod check: no pod = already gone');
+  ok((await opc({ statusCode: 200, body: { vm: podView({ state: 'deleting', actions: { delete: false } }) } })).pod_delete === 'already being deleted', 'own pod check: already being deleted');
+  ok(/cannot be deleted now/.test(await throws(opc({ statusCode: 200, body: { vm: podView({ state: 'launching', actions: { delete: false } }) } }))) && /could not read the Pods page/.test(await throws(opc({ error: { message: 'x' } }))), 'own pod check: a pod it cannot delete now, or a Pods page it cannot read, stops the run (the error workflow keeps trying)');
+  const noName = clone(f); delete noName.live.pod.name;
+  ok((await opc({ statusCode: 200, body: { vm: podView() } }, noName)).delete === false, 'own pod check: with no pod name nothing is deleted');
+  const dnx = (r, fin = f, chk = { delete: true, uptime_s: 1620, cost: 0.855 }) => run(wf, P + 'done', { nodes: { [P + 'finish']: fin, [P + 'own pod check']: chk, 'Look: ready': Sbase() }, input: r });
+  const dn1 = (await dnx({ statusCode: 200, body: { vm: { uptime_s: 1620, cost: 0.855 } } }))[0].json;
+  ok(dn1.broll.mode === 'live' && dn1.broll.status === 'ok' && dn1.broll.gpu_minutes === 27 && dn1.broll.gpu_rate_usd_h === 0.4275 && dn1.broll.pod_delete === 'deleted' && dn1.broll.gpu_cost_per_toolkit_usd === 0.855 && dn1.broll.files.length === 12 && dn1.slots.H1.slot1.wide.endsWith('H1A_1344x768.mp4') && dn1.run_id === '77' && dn1.broll.pod.name === 'swarm-pod-test' && !('by_this_run' in dn1.broll.pod), 'done: GPU minutes from the pod\'s uptime, rate from the pod, same state shape as the stand-in');
+  ok(dn1.broll.gpu_cost_estimate_usd === 0.1924 && /an estimate: gpu_minutes x gpu_rate_usd_h \/ 60/.test(dn1.broll.gpu_cost_note), 'done: the GPU cost is labelled minutes x hourly rate, an estimate (' + dn1.broll.gpu_cost_estimate_usd + ')');
+  const dn3 = (await dnx({ delete: false }, f, { delete: false, pod_delete: 'already gone' }))[0].json;
+  ok(dn3.broll.pod_delete === 'already gone' && dn3.broll.gpu_minutes > 24 && dn3.broll.gpu_minutes < 26, 'done: a pod already gone is fine; minutes from its launch time');
+  const dn4 = (await dnx({ statusCode: 409, body: { error: 'There is no pod.' } }))[0].json;
+  ok(/already gone/.test(dn4.broll.pod_delete), 'done: a delete that finds no pod is fine');
+  ok(/could not be deleted \(500: boom\)/.test(await throws(dnx({ statusCode: 500, body: { error: 'boom' } }))) && /could not be deleted \(409: Not now: the pod is setting_up/.test(await throws(dnx({ statusCode: 409, body: { error: 'Not now: the pod is setting_up.' } }))), 'done: a delete that failed stops the run (the error workflow tries again and tells Geoff)');
+  const dgv = (await run(wf, P + 'done', { nodes: { [P + 'finish']: gv, [P + 'own pod check']: { delete: true, uptime_s: 2760, cost: 0.4275 }, 'Look: ready': Sbase() }, input: { statusCode: 200, body: { vm: { uptime_s: 2760, cost: 0.4275 } } } }))[0].json;
+  ok(dgv.broll.status.startsWith('no pod: ') && dgv.broll.files.length === 0 && dgv.broll.gpu_minutes === 46 && dgv.slots.H1 && Object.keys(dgv.slots.H1).length === 0, 'done: a give-up still records the pod minutes it cost and sends no slots');
 
   // ---- Package: body takes the GPU numbers
   const PB = 'Package: body';
@@ -213,7 +248,9 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   const runPB = async (S) => (await run(wf, PB, { nodes: { 'Approval: build': A, 'Run: state for 12b': S, 'Brief form': { submittedAt: '2026-11-24T00:00:00Z' } }, input: pbIn }))[0].json.body;
   const SP = { ...Sbase(), brief: { product: 'Sleep', brand: 'B' }, rulebook: { brand: 'Restfield' }, disclaimer: 'd', llm_usd: 0.02, broll: dn1.broll };
   let pb = await runPB(SP);
-  ok(pb.run.gpu_minutes === 27 && pb.run.gpu_rate_usd_h === 0.4275 && pb.upload === true && /GPU costed from the pod rate/.test(pb.run.mode), 'package: live b-roll sends the pod minutes and rate');
+  ok(pb.run.gpu_minutes === 27 && pb.run.gpu_rate_usd_h === 0.4275 && pb.upload === true && /GPU costed from the pod rate \(an estimate\)/.test(pb.run.mode), 'package: live b-roll sends the pod minutes and rate');
+  pb = await runPB({ ...SP, broll: dgv.broll });
+  ok(pb.run.mode.includes('no b-roll (no pod: the pod was not ready after 45 minutes (x))') && pb.run.mode.length <= 200 && pb.run.gpu_minutes === 46, 'package: no pod = report.md\'s Mode line says the run had no b-roll and why');
   pb = await runPB({ ...SP, broll_mode: 'stand-in', broll: { mode: 'fixtures', clips: {}, files: [] } });
   ok(pb.run.gpu_minutes === 0 && pb.run.gpu_rate_usd_h === 0 && pb.run.mode === 'stand-in voice, stand-in b-roll; GPU and voice not costed yet' && pb.upload === false, 'package: stand-in b-roll stays at zero, same text as before');
   pb = await runPB({ ...SP, broll: { ...dn1.broll, gpu_rate_usd_h: 0 } });
@@ -222,28 +259,54 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   // ---- error workflow: pod clean-up
   const EN = 'Error: ';
   const live = cond(er, EN + 'failed in the live b-roll?');
-  const nodeOf = (n) => ({ [EN + 'build error.json']: { node: n } });
-  ok(live((x) => ({ first: () => ({ json: nodeOf('B-roll live: POST /api/broll/jobs')[EN + 'build error.json'] }) }), {}) && !live((x) => ({ first: () => ({ json: { node: 'Render: POST /render' } }) }), {}) && !live((x) => ({ first: () => ({ json: { node: 'B-roll: write clip' } }) }), {}), 'clean-up: only a failure in a "B-roll live: ..." node starts it');
+  const lv = (n) => live({}, { execution: n === undefined ? undefined : { lastNodeExecuted: n } });
+  ok(lv('B-roll live: POST /api/broll/jobs') && !lv('Render: POST /render') && !lv('B-roll: write clip') && !lv(undefined), 'clean-up: only a failure in a "B-roll live: ..." node starts it (read from Error: ids, not from the media folder step)');
+  const rec0 = async (text) => (await run(er, EN + 'pod record', { input: text === null ? { error: 'No file(s) found' } : { ok: 1 }, binaries: text === null ? null : [text] }))[0].json;
+  const askOwn = cond(er, EN + 'pod deployed by this run?');
+  let pr1 = await rec0('{"requested_at":"x","requested_ms":' + (Date.now() - 600000) + ',"name":"swarm-pod-test"}');
+  ok(pr1.pod_name === 'swarm-pod-test' && askOwn({}, pr1), 'clean-up: pod.json with a name = a pod this run deployed');
+  pr1 = await rec0('{"requested_at":"x","requested_ms":' + (Date.now() - 600000) + '}');
+  ok(!pr1.pod_name && pr1.requested_ms > 0 && askOwn({}, pr1), 'clean-up: pod.json with only requested_at (the deploy never answered) still counts');
+  for (const bad of [null, '{x', '{}', '{"name": ""}']) { const x = await rec0(bad); ok(/^(no pod to delete|left alone)/.test(x.cleanup) && !askOwn({}, x), 'clean-up: pod.json ' + (bad === null ? 'missing' : bad) + ' -> nothing is deleted: ' + x.cleanup); }
   const addr = async (text) => (await run(er, EN + 'toolkit address', { input: text === null ? {} : { ok: 1 }, binaries: text === null ? null : [text] }))[0].json;
   ok((await addr(CFG)).toolkit_url === 'https://toolkit.example.com' && /not read/.test((await addr(null)).cleanup) && /not valid JSON/.test((await addr('{x')).cleanup) && /no usable toolkit_url/.test((await addr('{"toolkit_url":"ftp://x"}')).cleanup), 'clean-up: address from the config, never throws');
-  const podQ = async (r) => (await run(er, EN + 'is there a pod to delete?', { input: r }))[0].json;
-  ok((await podQ({ statusCode: 200, body: { vm: null } })).cleanup === 'no pod to delete' && (await podQ({ statusCode: 200, body: { vm: null } })).delete === false, 'clean-up: no pod, nothing to do');
-  const del = await podQ({ statusCode: 200, body: { vm: { name: 'swarm-pod-x', kind: 'pod', state: 'booting', actions: { delete: true } } } });
-  ok(del.delete === true && del.pod === 'swarm-pod-x' && cond(er, EN + 'delete the pod?')({}, del), 'clean-up: a deletable pod is deleted');
-  ok(/left alone: swarm-build-x is a build host/.test((await podQ({ statusCode: 200, body: { vm: { name: 'swarm-build-x', kind: 'build', state: 'ready', actions: { delete: true } } } })).cleanup), 'clean-up: a build host is left alone');
-  ok(/already being deleted/.test((await podQ({ statusCode: 200, body: { vm: { name: 'p', kind: 'pod', state: 'deleting', actions: { delete: false } } } })).cleanup) && /cannot be deleted now/.test((await podQ({ statusCode: 200, body: { vm: { name: 'p', kind: 'pod', state: 'launching', actions: { delete: false } } } })).cleanup) && /could not read the Pods page \(401\)/.test((await podQ({ statusCode: 401, body: {} })).cleanup) && /no answer/.test((await podQ({ error: { message: 'x' } })).cleanup), 'clean-up: every other case is a line, not an exception');
-  const rec = async (input, pod) => (await run(er, EN + 'record the pod clean-up', { nodes: { [EN + 'is there a pod to delete?']: { pod } }, input }))[0].json.pod_cleanup;
+  const TQ = Date.now() - 600000;
+  const podQ = async (r, rec, wait = null) => { const nodes = { [EN + 'pod record']: rec }; if (wait) nodes[EN + 'wait to retry'] = wait; return (await run(er, EN + 'is there a pod to delete?', { nodes, input: r }))[0].json; };
+  const NAMED = { pod_name: 'swarm-pod-test', requested_ms: TQ }, UNNAMED = { pod_name: '', requested_ms: TQ };
+  const vmv = (o = {}) => ({ statusCode: 200, body: { vm: { name: 'swarm-pod-test', kind: 'pod', state: 'ready', launched_at: TQ / 1000 + 20, actions: { delete: true }, ...o } } });
+  ok((await podQ({ statusCode: 200, body: { vm: null } }, NAMED)).cleanup === 'no pod on the Pods page, nothing to delete', 'clean-up: no pod, nothing to do');
+  let del = await podQ(vmv(), NAMED);
+  ok(del.delete === true && del.pod === 'swarm-pod-test' && cond(er, EN + 'delete the pod?')({}, del), 'clean-up: the pod pod.json names is deleted');
+  const other = await podQ(vmv({ name: 'swarm-pod-owner', launched_at: TQ / 1000 + 20 }), NAMED);
+  ok(other.delete === false && !other.retry && /left alone: swarm-pod-owner was not deployed by this run/.test(other.cleanup), 'clean-up: a pod with another name is left alone, even one launched after the request');
+  del = await podQ(vmv({ name: 'swarm-pod-any' }), UNNAMED);
+  ok(del.delete === true, 'clean-up: no name recorded, a pod launched after the request is ours');
+  ok((await podQ(vmv({ launched_at: TQ / 1000 - 3600 }), UNNAMED)).delete === false && /not deployed by this run/.test((await podQ(vmv({ launched_at: TQ / 1000 - 3600 }), UNNAMED)).cleanup), 'clean-up: no name recorded, a pod launched before the request is left alone');
+  ok(/left alone: swarm-build-x/.test((await podQ(vmv({ name: 'swarm-build-x', kind: 'build', launched_at: TQ / 1000 + 5 }), UNNAMED)).cleanup), 'clean-up: a build host is never ours');
+  ok(/already being deleted/.test((await podQ(vmv({ state: 'deleting', actions: { delete: false } }), NAMED)).cleanup), 'clean-up: already being deleted');
+  const lau = await podQ(vmv({ state: 'launching', actions: { delete: false } }), NAMED);
+  ok(lau.delete === false && lau.retry === true && lau.attempt === 1 && cond(er, EN + 'try again?')({}, lau), 'clean-up: a pod still launching cannot be deleted: try again in 30 s');
+  const lau2 = await podQ(vmv({ state: 'launching', actions: { delete: false } }), NAMED, { ...lau });
+  ok(lau2.attempt === 2, 'clean-up: the attempt count rides through the wait');
+  const lau20 = await podQ(vmv({ state: 'launching', actions: { delete: false } }), NAMED, { attempt: 20 });
+  ok(lau20.retry === false && /^left for the idle timer: pod swarm-pod-test was still launching after 10 minutes/.test(lau20.cleanup), 'clean-up: 20 tries (10 minutes) then "left for the idle timer"');
+  ok((await podQ({ statusCode: 200, body: { vm: null } }, NAMED, { attempt: 3 })).cleanup === 'pod gone', 'clean-up: the pod went away while waiting');
+  ok(/could not read the Pods page \(401\)/.test((await podQ({ statusCode: 401, body: {} }, NAMED)).cleanup) && /no answer/.test((await podQ({ error: { message: 'x' } }, NAMED)).cleanup), 'clean-up: every other case is a line, not an exception');
+  const rec = async (input, pod) => (await run(er, EN + 'record the pod clean-up', { nodes: { [EN + 'is there a pod to delete?']: { pod }, }, input }))[0].json.pod_cleanup;
   ok((await rec({ statusCode: 200, body: { vm: {} } }, 'swarm-pod-x')) === 'deleted pod swarm-pod-x' && /failed: the delete answered 409 \(Not now/.test(await rec({ statusCode: 409, body: { error: 'Not now: the pod is deleting.' } }, 'p')) && (await rec({ cleanup: 'no pod to delete' })) === 'no pod to delete', 'clean-up: the outcome line');
   const E = { run_id: '77', node: 'B-roll live: POST /api/broll/jobs', message: 'the toolkit refused the b-roll job (503): B-roll workflow: workflow_api.json is not in x' };
   const cfgT = '{"telegram_chat_id": "12345678"}';
-  const et = (await run(er, EN + 'Telegram text', { nodes: { [EN + 'build error.json']: E, [EN + 'record the pod clean-up']: { pod_cleanup: 'deleted pod swarm-pod-x' } }, binaries: [cfgT] }))[0].json;
+  const ids = { run_id: '77', execution: { id: 77, lastNodeExecuted: 'B-roll live: POST /api/broll/jobs', error: { message: E.message } }, workflow: { name: 'ad-versions' } };
+  const be = async (nodes) => (await run(er, EN + 'build error.json', { nodes: { [EN + 'ids']: ids, ...nodes } }))[0];
+  const b1 = await be({ [EN + 'record the pod clean-up']: { pod_cleanup: 'deleted pod swarm-pod-x' } });
+  ok(JSON.parse(b1.binary.data.text).pod_cleanup === 'deleted pod swarm-pod-x' && b1.json.node === 'B-roll live: POST /api/broll/jobs', 'error.json: the first write already has the clean-up outcome (no later rewrite needed)');
+  ok(!('pod_cleanup' in (await be({})).json), 'error.json: no outcome when the clean-up did not run');
+  const et = (await run(er, EN + 'Telegram text', { nodes: { [EN + 'build error.json']: { ...E, pod_cleanup: 'deleted pod swarm-pod-x' } }, binaries: [cfgT] }))[0].json;
   ok(/\nPod: deleted pod swarm-pod-x\n/.test(et.text) && et.text.includes('503'), 'error text: the clean-up outcome is a line of the message');
   const et0 = (await run(er, EN + 'Telegram text', { nodes: { [EN + 'build error.json']: E }, binaries: [cfgT] }))[0].json;
   ok(!/Pod:/.test(et0.text), 'error text: no clean-up, no line');
-  const rt = JSON.parse((await run(er, EN + 'record the Telegram result', { nodes: { [EN + 'build error.json']: E, [EN + 'Telegram text']: et, [EN + 'record the pod clean-up']: { pod_cleanup: 'deleted pod swarm-pod-x' } }, input: { ok: true } }))[0].binary.data.text);
-  ok(rt.telegram === 'sent' && rt.pod_cleanup === 'deleted pod swarm-pod-x' && rt.run_id === '77', 'error.json: carries pod_cleanup');
-  const rt0 = JSON.parse((await run(er, EN + 'record the Telegram result', { nodes: { [EN + 'build error.json']: E, [EN + 'Telegram text']: et0 }, input: { ok: true } }))[0].binary.data.text);
-  ok(!('pod_cleanup' in rt0), 'error.json: no pod_cleanup when it did not run');
+  const rt = JSON.parse((await run(er, EN + 'record the Telegram result', { nodes: { [EN + 'build error.json']: { ...E, pod_cleanup: 'deleted pod swarm-pod-x' }, [EN + 'Telegram text']: et }, input: { ok: true } }))[0].binary.data.text);
+  ok(rt.telegram === 'sent' && rt.pod_cleanup === 'deleted pod swarm-pod-x' && rt.run_id === '77', 'error.json (second write): keeps pod_cleanup');
   console.log(fails ? 'FAILED ' + fails : 'ALL PASS');
   process.exit(fails ? 1 : 0);
 })();

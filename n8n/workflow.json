@@ -1159,7 +1159,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const S = $('Run data: build run.json').first().json;\nreturn [{ json: {\n  run_id: S.run_id, dry_run: S.dry_run, source: S.source, source_origin: S.source_origin,\n  beats: S.beats.map((b) => b.name + ' ' + b.start + '-' + b.end + ' ' + b.role + ' ' + JSON.stringify(b.x || b.face)),\n  reframe_sheet: S.reframe.sheet, reframe_flags: S.reframe.flags,\n  hooks: S.hooks.map((h) => ({ id: h.id, lines: h.lines, broll: h.broll })),\n  compliance_notes: S.compliance.notes, look: S.look, broll_files: S.broll.files, broll_gpu_minutes: S.broll.gpu_minutes || 0, broll_notes: S.broll.notes || [], slots: S.slots, llm_usd: S.llm_usd,\n} }];\n"
+    "jsCode": "const S = $('Run data: build run.json').first().json;\nreturn [{ json: {\n  run_id: S.run_id, dry_run: S.dry_run, source: S.source, source_origin: S.source_origin,\n  beats: S.beats.map((b) => b.name + ' ' + b.start + '-' + b.end + ' ' + b.role + ' ' + JSON.stringify(b.x || b.face)),\n  reframe_sheet: S.reframe.sheet, reframe_flags: S.reframe.flags,\n  hooks: S.hooks.map((h) => ({ id: h.id, lines: h.lines, broll: h.broll })),\n  compliance_notes: S.compliance.notes, look: S.look, broll_files: S.broll.files, broll_status: S.broll.status || null, broll_gpu_minutes: S.broll.gpu_minutes || 0, broll_notes: S.broll.notes || [], slots: S.slots, llm_usd: S.llm_usd,\n} }];\n"
    }
   },
   {
@@ -1839,7 +1839,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// POST /package body per docs/api.md. Costs: the GPU is the live b-roll's pod minutes at the pod's rate (0 for stand-in b-roll, or when the toolkit gave no rate); voice is not costed yet (0); upload only for a live b-roll run (R2 env needed).\nconst P = $input.first().json;\nif (P.expired) return [{ json: { ...P, any: false } }];\nconst A = $('Approval: build').first().json;\nconst S = $('Run: state for 12b').first().json;\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst hookOf = (id) => (S.hooks || []).find((h) => h.id === id);\nconst approved = P.approved.map((v) => {\n  const r = byId[v];\n  const hook = hookOf(r.hook);\n  return { version: v, file: r.file, hook_text: (hook && hook.lines && hook.lines['6']) || r.line, script: r.line, length_s: r.length_s, fmt: r.fmt,\n    synthetic_media: true, qa: r.qa, note: P.approved_notes[v] || '', v: 1, approver: P.approver || 'reviewer (form)', approved_at: P.submitted_at };\n});\nconst campaign = String(S.brief.product || '').trim().slice(0, 60) || 'Campaign';\nconst bl = S.broll || {};\nconst gpuMin = Number(bl.gpu_minutes) > 0 ? Number(bl.gpu_minutes) : 0, gpuRate = Number(bl.gpu_rate_usd_h) > 0 ? Number(bl.gpu_rate_usd_h) : 0;\nconst mode = (S.voice_mode === 'real' ? 'real' : 'stand-in') + ' voice, ' + (S.broll_mode === 'live' ? 'live' : 'stand-in') + ' b-roll; ' + (gpuRate > 0 ? 'GPU costed from the pod rate, voice not costed yet' : 'GPU and voice not costed yet');\nconst run = {\n  brand: String(S.rulebook.brand || S.brief.brand).slice(0, 40), campaign,\n  started_at: $('Brief form').first().json.submittedAt, review_ready_at: A.waiting_since, finished_at: new Date().toISOString(),\n  disclaimer: S.disclaimer, mode,\n  gpu_minutes: gpuMin, gpu_rate_usd_h: gpuRate, voice_usd: 0,\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n};\nif (P.general_note) run.review_note = P.general_note;\nif (S.brief.landing_url) run.link = S.brief.landing_url;\nif (S.brief.cta) run.cta = S.brief.cta;\nconst upload = S.broll_mode === 'live';                  // a stand-in run has no R2 environment to upload to; a live one needs it, or /package says so\nreturn [{ json: { ...P, any: approved.length > 0, body: { run_id: S.run_id, run, approved, rejected: P.rejected, upload } } }];\n"
+    "jsCode": "// POST /package body per docs/api.md. Costs: the GPU is the live b-roll's pod minutes at the pod's rate (0 for stand-in b-roll, or when the toolkit gave no rate); voice is not costed yet (0); upload only for a live b-roll run (R2 env needed).\nconst P = $input.first().json;\nif (P.expired) return [{ json: { ...P, any: false } }];\nconst A = $('Approval: build').first().json;\nconst S = $('Run: state for 12b').first().json;\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst hookOf = (id) => (S.hooks || []).find((h) => h.id === id);\nconst approved = P.approved.map((v) => {\n  const r = byId[v];\n  const hook = hookOf(r.hook);\n  return { version: v, file: r.file, hook_text: (hook && hook.lines && hook.lines['6']) || r.line, script: r.line, length_s: r.length_s, fmt: r.fmt,\n    synthetic_media: true, qa: r.qa, note: P.approved_notes[v] || '', v: 1, approver: P.approver || 'reviewer (form)', approved_at: P.submitted_at };\n});\nconst campaign = String(S.brief.product || '').trim().slice(0, 60) || 'Campaign';\nconst bl = S.broll || {};\nconst gpuMin = Number(bl.gpu_minutes) > 0 ? Number(bl.gpu_minutes) : 0, gpuRate = Number(bl.gpu_rate_usd_h) > 0 ? Number(bl.gpu_rate_usd_h) : 0;\nconst noBroll = /^no pod/.test(String(bl.status || ''));       // the live pod never got ready: the run went on with no b-roll\nconst mode = ((S.voice_mode === 'real' ? 'real' : 'stand-in') + ' voice, ' + (noBroll ? 'no b-roll (' + bl.status + ')' : (S.broll_mode === 'live' ? 'live' : 'stand-in') + ' b-roll') + '; ' + (gpuRate > 0 ? 'GPU costed from the pod rate (an estimate), voice not costed yet' : 'GPU and voice not costed yet')).slice(0, 200);\nconst run = {\n  brand: String(S.rulebook.brand || S.brief.brand).slice(0, 40), campaign,\n  started_at: $('Brief form').first().json.submittedAt, review_ready_at: A.waiting_since, finished_at: new Date().toISOString(),\n  disclaimer: S.disclaimer, mode,\n  gpu_minutes: gpuMin, gpu_rate_usd_h: gpuRate, voice_usd: 0,\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n};\nif (P.general_note) run.review_note = P.general_note;\nif (S.brief.landing_url) run.link = S.brief.landing_url;\nif (S.brief.cta) run.cta = S.brief.cta;\nconst upload = S.broll_mode === 'live';                  // a stand-in run has no R2 environment to upload to; a live one needs it, or /package says so\nreturn [{ json: { ...P, any: approved.length > 0, body: { run_id: S.run_id, run, approved, rejected: P.rejected, upload } } }];\n"
    }
   },
   {
@@ -2616,7 +2616,7 @@
     1560
    ],
    "parameters": {
-    "jsCode": "// Live b-roll (the toolkit's pods and /api/broll), step 1: the toolkit's address and the clips to ask for.\n// The address is the one thing kept out of the repo: data/config/toolkit.json, {\"toolkit_url\": \"https://<toolkit host>\"}.\nconst S = $('Look: ready').first().json;\nconst item = $input.first();\nif (!item.binary || !item.binary.data) throw new Error('config/toolkit.json was not read: it must hold {\"toolkit_url\": \"https://<toolkit host>\"}');\nlet cfg;\ntry { cfg = JSON.parse((await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); } catch (e) { throw new Error('config/toolkit.json is not valid JSON'); }\nconst toolkit_url = String(cfg && cfg.toolkit_url != null ? cfg.toolkit_url : '').trim().replace(/\\/+$/, '');\nif (!/^https:\\/\\/[A-Za-z0-9.-]+(:\\d{1,5})?$/.test(toolkit_url)) throw new Error('config/toolkit.json: toolkit_url must be https://<host>, no path');\nconst VARIANT = 'turbo8', SECONDS = 3;                                   // 8 steps; the cutaway is 3 s (config/edit.yaml cutaway_s)\nconst SIZES = [['1344x768', 1344, 768], ['768x1344', 768, 1344]];       // wide (16X9, 1X1) and tall (9X16)\nconst SUFFIX = ', 24 fps, no people, no text';\nconst trim = (s) => String(s || '').trim().replace(/[.,;\\s]+$/, '');\nconst look = trim(S.look && S.look.line);\nconst clips = [];\n(S.hooks || []).forEach((h, hi) => (h.broll || []).forEach((shot, si) => {\n  if (!shot) return;                                                      // a shot the compliance pass dropped\n  const prompt = trim(shot) + (look ? ', ' + look : '') + SUFFIX;       // spec 4.3: shot + look line + the suffix\n  if (prompt.length > 2000) throw new Error('broll: the prompt for ' + h.id + 'ABC'[si] + ' is over 2000 characters');\n  for (const [size, w, ht] of SIZES) clips.push({ clip: h.id + 'ABC'[si], size, w, h: ht, prompt, seed: (hi + 1) * 1000 + (si + 1) * 7, tries: 0, attempts: 0, status: 'pending' });\n}));\nif (!clips.length) throw new Error('broll: no shot left to cover');\nconst now = Date.now();\nreturn [{ json: { live: { toolkit_url, started_ms: now, pod_deadline_ms: now + 30 * 60000, variant: VARIANT, seconds: SECONDS, clips, jobs: [], job_failures: 0, submit_waits: 0, submit_until_ms: null, job: null, pod: null } } }];\n"
+    "jsCode": "// Live b-roll (the toolkit's pods and /api/broll), step 1: the toolkit's address and the clips to ask for.\n// The address is the one thing kept out of the repo: data/config/toolkit.json, {\"toolkit_url\": \"https://<toolkit host>\"}.\nconst S = $('Look: ready').first().json;\nconst item = $input.first();\nif (!item.binary || !item.binary.data) throw new Error('config/toolkit.json was not read: it must hold {\"toolkit_url\": \"https://<toolkit host>\"}');\nlet cfg;\ntry { cfg = JSON.parse((await this.helpers.getBinaryDataBuffer(0, 'data')).toString('utf8')); } catch (e) { throw new Error('config/toolkit.json is not valid JSON'); }\nconst toolkit_url = String(cfg && cfg.toolkit_url != null ? cfg.toolkit_url : '').trim().replace(/\\/+$/, '');\nif (!/^https:\\/\\/[A-Za-z0-9.-]+(:\\d{1,5})?$/.test(toolkit_url)) throw new Error('config/toolkit.json: toolkit_url must be https://<host>, no path');\nconst VARIANT = 'turbo8', SECONDS = 3;                                   // 8 steps; the cutaway is 3 s (config/edit.yaml cutaway_s)\nconst SIZES = [['1344x768', 1344, 768], ['768x1344', 768, 1344]];       // wide (16X9, 1X1) and tall (9X16)\nconst SUFFIX = ', 24 fps, no people, no text';\nconst trim = (s) => String(s || '').trim().replace(/[.,;\\s]+$/, '');\nconst look = trim(S.look && S.look.line);\nconst clips = [];\n(S.hooks || []).forEach((h, hi) => (h.broll || []).forEach((shot, si) => {\n  if (!shot) return;                                                      // a shot the compliance pass dropped\n  const prompt = trim(shot) + (look ? ', ' + look : '') + SUFFIX;       // spec 4.3: shot + look line + the suffix\n  if (prompt.length > 2000) throw new Error('broll: the prompt for ' + h.id + 'ABC'[si] + ' is over 2000 characters');\n  for (const [size, w, ht] of SIZES) clips.push({ clip: h.id + 'ABC'[si], size, w, h: ht, prompt, seed: (hi + 1) * 1000 + (si + 1) * 7, tries: 0, attempts: 0, status: 'pending' });\n}));\nif (!clips.length) throw new Error('broll: no shot left to cover');\nconst now = Date.now();\nreturn [{ json: { live: { toolkit_url, started_ms: now, pod_deadline_ms: now + 45 * 60000, variant: VARIANT, seconds: SECONDS, clips, jobs: [], status: 'ok', job_failures: 0, submit_waits: 0, submit_until_ms: null, job: null, pod: null } } }];\n"
    }
   },
   {
@@ -2661,7 +2661,7 @@
     1560
    ],
    "parameters": {
-    "jsCode": "// Live b-roll, the pod: what the Pods page says -> deploy, wait, or ready (or stop with the reason). The 30-minute limit runs from the start of the branch.\nconst L = JSON.parse(JSON.stringify($('B-roll live: plan').first().json.live));\nconst r = $input.first().json || {};\nconst now = Date.now();\nlet prev = {};\ntry { prev = $('B-roll live: wait for the pod').last().json || {}; } catch (e) { prev = {}; }   // what the last round carried (deploy_sent); empty on the first\nconst late = now > L.pod_deadline_ms;\nconst text = (x) => String(x == null ? '' : x).slice(0, 300);\nconst sent = !!prev.deploy_sent;\nconst wait = (why) => {\n  if (late) throw new Error('the GPU pod was not ready after 30 minutes (' + why + ')');\n  return [{ json: { live: L, next: 'wait', why, deploy_sent: sent } }];\n};\nif (r.error || r.statusCode == null) return wait('the toolkit did not answer: ' + text(r.error && (r.error.message || r.error)));\nif (r.statusCode === 401 || r.statusCode === 403) throw new Error('the toolkit refused the machine token (' + r.statusCode + '): check the toolkit-machine credential');\nif (r.statusCode !== 200) return wait('GET /api/pods answered ' + r.statusCode);\nconst b = r.body || {};\nif (b.configured === false) throw new Error('the toolkit\\'s Pods is not configured: missing ' + text((b.missing || []).join(', ')));\nconst vm = b.vm;\nif (!vm) {\n  if (sent) throw new Error('the pod deployed for this run is gone from the Pods page (deleted by its idle or cap timer, or by hand)');\n  return [{ json: { live: L, next: 'deploy', deploy_sent: false } }];\n}\nif (vm.kind === 'build') throw new Error('a build host (' + text(vm.name) + ') is on the Pods page, not a GPU pod: left alone');\nconst st = String(vm.state || '');\nif (st === 'setup_failed') throw new Error('the pod ' + text(vm.name) + ' failed its setup (' + text(vm.step) + ': ' + text(vm.setup_error || 'no reason given') + ')');\nif (st === 'deleting') return wait('the pod ' + text(vm.name) + ' is being deleted');      // once it is gone the page shows none and a new one is deployed\nif (st !== 'ready') return wait('the pod ' + text(vm.name) + ' is ' + st + (vm.step ? ' (' + text(vm.step) + ')' : ''));\nconst queue = Array.isArray(vm.add_queue) ? vm.add_queue : [];\nconst have = new Set([].concat(vm.bundles || [], vm.bundles_started || [], ...queue.filter((q) => q && q.kind === 'bundles').map((q) => q.names || [])));\nif (!have.has('h3-t2v')) throw new Error('the pod ' + text(vm.name) + ' was not deployed with the h3-t2v bundle (it has: ' + text([...have].join(', ') || 'none') + ')');\n// ready is not enough: the bundles download after it (the same check /api/broll makes before it takes a job)\nconst dl = String((((vm.snapshot || {}).picker) || {}).download || '');\nif (queue.length) return wait('the pod is ready, its bundles are queued');\nif (dl === 'running') return wait('the pod is ready, its bundles are downloading');\nif ((vm.bundles_started || []).length) {\n  if (dl.indexOf('failed') === 0) throw new Error('a bundle download failed on the pod ' + text(vm.name) + ' (' + text(dl) + ')');\n  if (dl !== 'done') return wait('the pod is ready, its bundles are not confirmed yet (' + (dl || 'no reading') + ')');\n}\nconst rate = Number(vm.final_price_hr) > 0 ? Number(vm.final_price_hr) : Number(vm.rate) || 0;\nL.pod = { name: String(vm.name || ''), product: String(vm.product || ''), rate_usd_h: rate, launched_at: Number(vm.launched_at) || null, by_this_run: sent || (Number(vm.launched_at) || 0) * 1000 >= L.started_ms - 120000 };\nL.pod_ready_ms = now;\nreturn [{ json: { live: L, next: 'ready', deploy_sent: sent } }];\n"
+    "jsCode": "// Live b-roll, the pod. The branch never uses a pod it found: a pod on the Pods page before our deploy stops the run. After our deploy (the \"deploy result\" node ran)\n// it follows that pod, and a pod that is not ready with its bundles within 45 minutes (or fails its setup) gives up: the pod is deleted and the run goes on without b-roll.\nconst L = JSON.parse(JSON.stringify($('B-roll live: plan').first().json.live));\nconst r = $input.first().json || {};\nconst now = Date.now();\nlet D = null;\ntry { D = $('B-roll live: deploy result').first().json; } catch (e) { D = null; }       // ran once, after the toolkit accepted our deploy\nconst sent = !!D;\nconst late = now > L.pod_deadline_ms;\nconst text = (x) => String(x == null ? '' : x).slice(0, 300);\nif (sent) L.pod = { name: String(D.pod_name || ''), product: '', rate_usd_h: 0, launched_at: null };\nconst giveUp = (why) => [{ json: { live: L, next: 'give_up', reason: 'no pod: ' + why } }];\nconst wait = (why) => {\n  if (!late) return [{ json: { live: L, next: 'wait', why } }];\n  if (sent) return giveUp('the pod was not ready after 45 minutes (' + why + ')');\n  throw new Error('the toolkit gave no GPU pod in 45 minutes (' + why + ')');\n};\nif (r.error || r.statusCode == null) return wait('the toolkit did not answer: ' + text(r.error && (r.error.message || r.error)));\nif (r.statusCode === 401 || r.statusCode === 403) throw new Error('the toolkit refused the machine token (' + r.statusCode + '): check the toolkit-machine credential');\nif (r.statusCode !== 200) return wait('GET /api/pods answered ' + r.statusCode);\nconst b = r.body || {};\nif (b.configured === false) throw new Error('the toolkit\\'s Pods is not configured: missing ' + text((b.missing || []).join(', ')));\nconst vm = b.vm;\nif (!sent) {\n  if (vm) throw new Error('A GPU pod is already running (' + text(vm.name) + ', ' + text(vm.state) + '). Delete it on the Pods page or choose B-roll: stand-in.');\n  return [{ json: { live: L, next: 'deploy' } }];\n}\nif (!vm) throw new Error('the pod this run deployed (' + text(D.pod_name) + ') is gone from the Pods page (deleted by its idle or cap timer, or by hand)');\nif (D.pod_name && vm.name !== D.pod_name) throw new Error('the pod on the Pods page (' + text(vm.name) + ') is not the one this run deployed (' + text(D.pod_name) + ')');\nconst st = String(vm.state || '');\nconst rate = Number(vm.final_price_hr) > 0 ? Number(vm.final_price_hr) : Number(vm.rate) || 0;\nL.pod = { name: String(vm.name || ''), product: String(vm.product || ''), rate_usd_h: rate, launched_at: Number(vm.launched_at) || null };\nif (st === 'deleting') throw new Error('the pod this run deployed (' + text(vm.name) + ') is being deleted (idle or cap timer, or by hand)');\nif (st === 'setup_failed') return giveUp('the pod ' + text(vm.name) + ' failed its setup (' + text(vm.step) + ': ' + text(vm.setup_error || 'no reason given') + ')');\nif (st !== 'ready') return wait('the pod ' + text(vm.name) + ' is ' + st + (vm.step ? ' (' + text(vm.step) + ')' : ''));\n// ready is not enough: the bundles download after it (the same check /api/broll makes before it takes a job)\nconst queue = Array.isArray(vm.add_queue) ? vm.add_queue : [];\nconst dl = String((((vm.snapshot || {}).picker) || {}).download || '');\nif (queue.length) return wait('the pod is ready, its bundles are queued');\nif (dl === 'running') return wait('the pod is ready, its bundles are downloading');\nif ((vm.bundles_started || []).length) {\n  if (dl.indexOf('failed') === 0) return giveUp('a bundle download failed on the pod ' + text(vm.name) + ' (' + text(dl) + ')');\n  if (dl !== 'done') return wait('the pod is ready, its bundles are not confirmed yet (' + (dl || 'no reading') + ')');\n}\nL.pod_ready_ms = now;\nreturn [{ json: { live: L, next: 'ready' } }];\n"
    }
   },
   {
@@ -2734,6 +2734,40 @@
   },
   {
    "id": "00000162-0000-4000-8000-000000000000",
+   "name": "B-roll live: give up?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    3320,
+    1840
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.next === 'give_up' }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000163-0000-4000-8000-000000000000",
    "name": "B-roll live: POST /api/pods/catalog",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
@@ -2769,7 +2803,7 @@
    "onError": "continueRegularOutput"
   },
   {
-   "id": "00000163-0000-4000-8000-000000000000",
+   "id": "00000164-0000-4000-8000-000000000000",
    "name": "B-roll live: catalog check",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
@@ -2782,12 +2816,41 @@
    }
   },
   {
-   "id": "00000164-0000-4000-8000-000000000000",
+   "id": "00000165-0000-4000-8000-000000000000",
+   "name": "B-roll live: pod request",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    4010,
+    1700
+   ],
+   "parameters": {
+    "jsCode": "// runs/<id>/pod.json, written BEFORE the deploy call: {requested_at}. The error workflow deletes only a pod this file says this run deployed.\nconst data = { requested_at: new Date().toISOString(), requested_ms: Date.now() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'pod.json', 'application/json');\nreturn [{ json: { ...$input.first().json, pod_request: data }, binary: { data: bin } }];\n"
+   }
+  },
+  {
+   "id": "00000166-0000-4000-8000-000000000000",
+   "name": "B-roll live: write pod.json (request)",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    4240,
+    1700
+   ],
+   "parameters": {
+    "operation": "write",
+    "fileName": "=/data/runs/{{ $execution.id }}/pod.json",
+    "dataPropertyName": "data",
+    "options": {}
+   }
+  },
+  {
+   "id": "00000167-0000-4000-8000-000000000000",
    "name": "B-roll live: POST /api/pods/deploy",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
-    4010,
+    4470,
     1700
    ],
    "parameters": {
@@ -2818,20 +2881,37 @@
    "onError": "continueRegularOutput"
   },
   {
-   "id": "00000165-0000-4000-8000-000000000000",
+   "id": "00000168-0000-4000-8000-000000000000",
    "name": "B-roll live: deploy result",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    4240,
+    4700,
     1700
    ],
    "parameters": {
-    "jsCode": "// POST /api/pods/deploy answers 202 {vm}; any refusal stops the run with the toolkit's own words (the plain-A6000 and tunnel questions are the owner's).\nconst r = $input.first().json || {};\nconst D = $('B-roll live: pod decision').last().json;\nconst b = r.body || {};\nif (r.error || r.statusCode !== 202) {\n  let msg = 'the toolkit refused to deploy the GPU pod (' + (r.statusCode || 'no answer') + '): ' + String(b.error || (r.error && (r.error.message || r.error)) || 'no reason given').slice(0, 300);\n  if (b.confirm === 'plain') msg += ' [the premium A6000 is out of stock: ask the owner before using the plain A6000]';\n  if (b.confirm === 'tunnel') msg += ' [the pod address could not be probed: ask the owner]';\n  throw new Error(msg);\n}\nreturn [{ json: { live: D.live, next: 'wait', why: 'deployed ' + String((b.vm && b.vm.name) || 'a pod'), deploy_sent: true } }];\n"
+    "jsCode": "// POST /api/pods/deploy answers 202 {vm}; any refusal stops the run with the toolkit's own words (the plain-A6000 and tunnel questions are the owner's).\n// On a 202 the pod's name goes into runs/<id>/pod.json next to requested_at: that is the pod this run owns.\nconst r = $input.first().json || {};\nconst D = $('B-roll live: pod decision').last().json;\nconst R = $('B-roll live: pod request').first().json.pod_request;\nconst b = r.body || {};\nif (r.error || r.statusCode !== 202) {\n  let msg = 'the toolkit refused to deploy the GPU pod (' + (r.statusCode || 'no answer') + '): ' + String(b.error || (r.error && (r.error.message || r.error)) || 'no reason given').slice(0, 300);\n  if (b.confirm === 'plain') msg += ' [the premium A6000 is out of stock: ask the owner before using the plain A6000]';\n  if (b.confirm === 'tunnel') msg += ' [the pod address could not be probed: ask the owner]';\n  throw new Error(msg);\n}\nconst name = String((b.vm && b.vm.name) || '').slice(0, 80);\nconst data = { ...R, name, deployed_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'pod.json', 'application/json');\nreturn [{ json: { live: D.live, next: 'wait', why: 'deployed ' + (name || 'a pod'), pod_name: name }, binary: { data: bin } }];\n"
    }
   },
   {
-   "id": "00000166-0000-4000-8000-000000000000",
+   "id": "00000169-0000-4000-8000-000000000000",
+   "name": "B-roll live: write pod.json (name)",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    4930,
+    1700
+   ],
+   "parameters": {
+    "operation": "write",
+    "fileName": "=/data/runs/{{ $execution.id }}/pod.json",
+    "dataPropertyName": "data",
+    "options": {}
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000170-0000-4000-8000-000000000000",
    "name": "B-roll live: wait for the pod",
    "type": "n8n-nodes-base.wait",
    "typeVersion": 1.1,
@@ -2844,10 +2924,10 @@
     "amount": 30,
     "unit": "seconds"
    },
-   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-12b0a7d100a7"
+   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-12b0a7d100ab"
   },
   {
-   "id": "00000167-0000-4000-8000-000000000000",
+   "id": "00000171-0000-4000-8000-000000000000",
    "name": "B-roll live: next batch",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
@@ -2860,7 +2940,7 @@
    }
   },
   {
-   "id": "00000168-0000-4000-8000-000000000000",
+   "id": "00000172-0000-4000-8000-000000000000",
    "name": "B-roll live: anything to submit?",
    "type": "n8n-nodes-base.if",
    "typeVersion": 2.2,
@@ -2894,7 +2974,7 @@
    }
   },
   {
-   "id": "00000169-0000-4000-8000-000000000000",
+   "id": "00000173-0000-4000-8000-000000000000",
    "name": "B-roll live: POST /api/broll/jobs",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
@@ -2930,7 +3010,7 @@
    "onError": "continueRegularOutput"
   },
   {
-   "id": "00000170-0000-4000-8000-000000000000",
+   "id": "00000174-0000-4000-8000-000000000000",
    "name": "B-roll live: submit result",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
@@ -2939,11 +3019,11 @@
     2020
    ],
    "parameters": {
-    "jsCode": "// POST /api/broll/jobs: 202 {id} = accepted. A 409 with retry:true (one job at a time, still booting, bundles) waits and asks again;\n// everything else (400, 503 = the workflow export is missing, 409 retry:false, no answer) stops the run with the toolkit's words.\nconst N = $('B-roll live: next batch').last().json;\nconst L = JSON.parse(JSON.stringify(N.live));\nconst r = $input.first().json || {};\nconst b = r.body || {};\nconst now = Date.now();\nconst text = (x) => String(x == null ? '' : x).slice(0, 300);\nif (!r.error && r.statusCode === 202 && b.id && /^[0-9a-f]{6,32}$/.test(String(b.id))) {\n  L.job = { id: String(b.id), submitted_ms: now, batch: N.batch, seen: {}, poll_errors: 0 };\n  L.jobs.push({ id: String(b.id), clips: N.batch.length });\n  return [{ json: { live: L, accepted: true } }];\n}\nconst why = text(b.error || (r.error && (r.error.message || r.error)) || 'no reason given');\nif (r.statusCode === 409 && b.retry === true) {\n  L.submit_waits += 1;\n  if (now > L.submit_until_ms) throw new Error('the toolkit would not take the b-roll job in 30 minutes (' + why + ')');\n  return [{ json: { live: L, accepted: false, why } }];\n}\nthrow new Error('the toolkit refused the b-roll job (' + (r.statusCode || 'no answer') + '): ' + why);\n"
+    "jsCode": "// POST /api/broll/jobs: 202 {id} = accepted. A 409 with retry:true (one job at a time, still booting, bundles) waits and asks again;\n// everything else (400, 503 = the workflow export is missing, 409 retry:false, no answer) stops the run with the toolkit's words.\nconst N = $('B-roll live: next batch').last().json;\nconst L = JSON.parse(JSON.stringify(N.live));\nconst r = $input.first().json || {};\nconst b = r.body || {};\nconst now = Date.now();\nconst text = (x) => String(x == null ? '' : x).slice(0, 300);\nif (!r.error && r.statusCode === 202 && b.id && /^[0-9a-f]{6,32}$/.test(String(b.id))) {\n  L.submit_until_ms = null;                                        // the resubmit window starts again for the next job\n  L.job = { id: String(b.id), submitted_ms: now, batch: N.batch, seen: {}, poll_errors: 0 };\n  L.jobs.push({ id: String(b.id), clips: N.batch.length });\n  return [{ json: { live: L, accepted: true } }];\n}\nconst why = text(b.error || (r.error && (r.error.message || r.error)) || 'no reason given');\nif (r.statusCode === 409 && b.retry === true) {\n  L.submit_waits += 1;\n  if (now > L.submit_until_ms) throw new Error('the toolkit would not take the b-roll job in 30 minutes (' + why + ')');\n  return [{ json: { live: L, accepted: false, why } }];\n}\nthrow new Error('the toolkit refused the b-roll job (' + (r.statusCode || 'no answer') + '): ' + why);\n"
    }
   },
   {
-   "id": "00000171-0000-4000-8000-000000000000",
+   "id": "00000175-0000-4000-8000-000000000000",
    "name": "B-roll live: job accepted?",
    "type": "n8n-nodes-base.if",
    "typeVersion": 2.2,
@@ -2977,7 +3057,7 @@
    }
   },
   {
-   "id": "00000172-0000-4000-8000-000000000000",
+   "id": "00000176-0000-4000-8000-000000000000",
    "name": "B-roll live: wait to resubmit",
    "type": "n8n-nodes-base.wait",
    "typeVersion": 1.1,
@@ -2990,10 +3070,10 @@
     "amount": 20,
     "unit": "seconds"
    },
-   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-12b0a7d100ad"
+   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-12b0a7d100b1"
   },
   {
-   "id": "00000173-0000-4000-8000-000000000000",
+   "id": "00000177-0000-4000-8000-000000000000",
    "name": "B-roll live: wait for the clips",
    "type": "n8n-nodes-base.wait",
    "typeVersion": 1.1,
@@ -3006,10 +3086,10 @@
     "amount": 15,
     "unit": "seconds"
    },
-   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-12b0a7d100ae"
+   "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-12b0a7d100b2"
   },
   {
-   "id": "00000174-0000-4000-8000-000000000000",
+   "id": "00000178-0000-4000-8000-000000000000",
    "name": "B-roll live: GET /api/broll/jobs/<id>",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
@@ -3041,7 +3121,7 @@
    "onError": "continueRegularOutput"
   },
   {
-   "id": "00000175-0000-4000-8000-000000000000",
+   "id": "00000179-0000-4000-8000-000000000000",
    "name": "B-roll live: poll result",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
@@ -3054,7 +3134,7 @@
    }
   },
   {
-   "id": "00000176-0000-4000-8000-000000000000",
+   "id": "00000180-0000-4000-8000-000000000000",
    "name": "B-roll live: job running?",
    "type": "n8n-nodes-base.if",
    "typeVersion": 2.2,
@@ -3088,7 +3168,7 @@
    }
   },
   {
-   "id": "00000177-0000-4000-8000-000000000000",
+   "id": "00000181-0000-4000-8000-000000000000",
    "name": "B-roll live: files to fetch?",
    "type": "n8n-nodes-base.if",
    "typeVersion": 2.2,
@@ -3122,7 +3202,7 @@
    }
   },
   {
-   "id": "00000178-0000-4000-8000-000000000000",
+   "id": "00000182-0000-4000-8000-000000000000",
    "name": "B-roll live: files to fetch",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
@@ -3135,7 +3215,7 @@
    }
   },
   {
-   "id": "00000179-0000-4000-8000-000000000000",
+   "id": "00000183-0000-4000-8000-000000000000",
    "name": "B-roll live: GET clip file",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
@@ -3168,7 +3248,7 @@
    "onError": "continueRegularOutput"
   },
   {
-   "id": "00000180-0000-4000-8000-000000000000",
+   "id": "00000184-0000-4000-8000-000000000000",
    "name": "B-roll live: check download",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
@@ -3181,7 +3261,7 @@
    }
   },
   {
-   "id": "00000181-0000-4000-8000-000000000000",
+   "id": "00000185-0000-4000-8000-000000000000",
    "name": "B-roll live: write clip",
    "type": "n8n-nodes-base.readWriteFile",
    "typeVersion": 1.1,
@@ -3198,7 +3278,7 @@
    "onError": "continueRegularOutput"
   },
   {
-   "id": "00000182-0000-4000-8000-000000000000",
+   "id": "00000186-0000-4000-8000-000000000000",
    "name": "B-roll live: after downloads",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
@@ -3211,7 +3291,7 @@
    }
   },
   {
-   "id": "00000183-0000-4000-8000-000000000000",
+   "id": "00000187-0000-4000-8000-000000000000",
    "name": "B-roll live: finish",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
@@ -3220,16 +3300,95 @@
     2300
    ],
    "parameters": {
-    "jsCode": "// Every clip is made, retried, or dropped. broll.clips: {H1A: {wide, tall, wide_wall_s, ...}}; slots as the stand-in branch builds them (A -> slot1, B -> slot2,\n// C -> slot3). A slot needs both sizes; one without leaves its cutaway out (the media service drops it) and the run notes say why.\nconst S = $('Look: ready').first().json;\nconst L = JSON.parse(JSON.stringify($input.first().json.live));\nconst clips = {}, files = [], notes = [];\nfor (const c of L.clips) {\n  const e = (clips[c.clip] = clips[c.clip] || {});\n  const k = c.size === '1344x768' ? 'wide' : 'tall';\n  e[k + '_wall_s'] = c.wall_s == null ? null : c.wall_s;\n  e[k + '_tries'] = c.tries;\n  if (c.status === 'done') { e[k] = c.file; files.push(c.file); } else e[k + '_dropped'] = c.reason || c.last_error || 'not made';\n}\nconst slots = {};\nfor (const h of S.hooks) {\n  slots[h.id] = {};\n  ['A', 'B', 'C'].forEach((l, i) => {\n    if (!h.broll[i]) return;\n    const c = clips[h.id + l];\n    if (c && c.wide && c.tall) slots[h.id]['slot' + (i + 1)] = { wide: c.wide, tall: c.tall };\n    else notes.push(h.id + l + ': no cutaway (' + [c && c.wide_dropped, c && c.tall_dropped].filter(Boolean).join('; ') + ')');\n  });\n}\nif (!Object.values(slots).some((s) => Object.keys(s).length)) throw new Error('no b-roll clip could be made, so no version has a cutaway: ' + notes.join(' | ').slice(0, 600));\nreturn [{ json: { live: L, result: { clips, files, slots, notes } } }];\n"
+    "jsCode": "// Every clip is made, retried, or dropped (or the pod never got ready: next = give_up, no b-roll). broll.clips: {H1A: {wide, tall, wide_wall_s, ...}}; slots as the\n// stand-in branch builds them (A -> slot1, B -> slot2, C -> slot3). A slot needs both sizes; one without leaves its cutaway out (the media service drops it).\nconst S = $('Look: ready').first().json;\nconst I = $input.first().json;\nconst L = JSON.parse(JSON.stringify(I.live));\nif (I.next === 'give_up') {\n  const slots = {};\n  for (const h of S.hooks) slots[h.id] = {};\n  L.status = String(I.reason).slice(0, 300);\n  return [{ json: { live: L, result: { clips: {}, files: [], slots, notes: ['no b-roll: ' + L.status] } } }];\n}\nconst clips = {}, files = [], notes = [];\nfor (const c of L.clips) {\n  const e = (clips[c.clip] = clips[c.clip] || {});\n  const k = c.size === '1344x768' ? 'wide' : 'tall';\n  e[k + '_wall_s'] = c.wall_s == null ? null : c.wall_s;\n  e[k + '_tries'] = c.tries;\n  if (c.status === 'done') { e[k] = c.file; files.push(c.file); } else e[k + '_dropped'] = c.reason || c.last_error || 'not made';\n}\nconst slots = {};\nfor (const h of S.hooks) {\n  slots[h.id] = {};\n  ['A', 'B', 'C'].forEach((l, i) => {\n    if (!h.broll[i]) return;\n    const c = clips[h.id + l];\n    if (c && c.wide && c.tall) slots[h.id]['slot' + (i + 1)] = { wide: c.wide, tall: c.tall };\n    else notes.push(h.id + l + ': no cutaway (' + [c && c.wide_dropped, c && c.tall_dropped].filter(Boolean).join('; ') + ')');\n  });\n}\nif (!Object.values(slots).some((s) => Object.keys(s).length)) throw new Error('no b-roll clip could be made, so no version has a cutaway: ' + notes.join(' | ').slice(0, 600));\nreturn [{ json: { live: L, result: { clips, files, slots, notes } } }];\n"
    }
   },
   {
-   "id": "00000184-0000-4000-8000-000000000000",
-   "name": "B-roll live: POST /api/pods/delete",
+   "id": "00000188-0000-4000-8000-000000000000",
+   "name": "B-roll live: GET /api/pods before the delete",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
     4010,
+    2300
+   ],
+   "parameters": {
+    "method": "GET",
+    "url": "={{ $('B-roll live: plan').first().json.live.toolkit_url }}/api/pods",
+    "authentication": "genericCredentialType",
+    "genericAuthType": "httpHeaderAuth",
+    "options": {
+     "timeout": 30000,
+     "response": {
+      "response": {
+       "fullResponse": true,
+       "neverError": true,
+       "responseFormat": "json"
+      }
+     }
+    }
+   },
+   "credentials": {
+    "httpHeaderAuth": {
+     "name": "toolkit-machine"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000189-0000-4000-8000-000000000000",
+   "name": "B-roll live: own pod check",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    4240,
+    2300
+   ],
+   "parameters": {
+    "jsCode": "// Before the delete: the Pods page must show the pod this run deployed (the name in runs/<id>/pod.json). Anything else is left alone.\nconst F = $('B-roll live: finish').first().json;\nconst name = String((F.live.pod && F.live.pod.name) || '');\nconst r = $input.first().json || {};\nconst text = (x) => String(x == null ? '' : x).slice(0, 200);\nif (!name) return [{ json: { delete: false, pod_delete: 'none: this run has no pod name' } }];\nif (r.error || r.statusCode !== 200) throw new Error('could not read the Pods page to delete the pod ' + name + ' (' + (r.statusCode || 'no answer') + ')');\nconst vm = (r.body || {}).vm;\nif (!vm) return [{ json: { delete: false, pod_delete: 'already gone' } }];\nif (vm.name !== name) return [{ json: { delete: false, pod_delete: 'left alone: ' + text(vm.name) + ' is not the pod this run deployed (' + name + ')' } }];\nif (vm.state === 'deleting') return [{ json: { delete: false, pod_delete: 'already being deleted', uptime_s: vm.uptime_s, cost: vm.cost } }];\nif (!vm.actions || vm.actions.delete !== true) throw new Error('the pod ' + name + ' is ' + text(vm.state) + ' and cannot be deleted now: the error workflow keeps trying');\nreturn [{ json: { delete: true, uptime_s: vm.uptime_s, cost: vm.cost } }];\n"
+   }
+  },
+  {
+   "id": "00000190-0000-4000-8000-000000000000",
+   "name": "B-roll live: delete the pod?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    4470,
+    2300
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.delete === true }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000191-0000-4000-8000-000000000000",
+   "name": "B-roll live: POST /api/pods/delete",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    4700,
     2300
    ],
    "parameters": {
@@ -3260,20 +3419,20 @@
    "onError": "continueRegularOutput"
   },
   {
-   "id": "00000185-0000-4000-8000-000000000000",
+   "id": "00000192-0000-4000-8000-000000000000",
    "name": "B-roll live: done",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    4240,
-    2300
+    4930,
+    2370
    ],
    "parameters": {
-    "jsCode": "// The pod is deleted (or was already gone). The run state leaves in the shape the stand-in branch's \"done\" gives, plus what the live branch measured.\nconst F = $('B-roll live: finish').first().json;\nconst L = F.live;\nconst S = $('Look: ready').first().json;\nconst r = $input.first().json || {};\nconst b = r.body || {};\nconst vm = b.vm || {};\nconst now = Date.now();\nconst text = (x) => String(x == null ? '' : x).slice(0, 300);\nlet pod_delete;\nif (!r.error && r.statusCode === 200) pod_delete = 'deleted';\nelse if (!r.error && r.statusCode === 409 && /There is no pod|deleting/i.test(String(b.error || ''))) pod_delete = 'already gone: ' + text(b.error);\nelse throw new Error('the GPU pod could not be deleted (' + (r.statusCode || 'no answer') + ': ' + text(b.error || (r.error && (r.error.message || r.error)) || 'no reason given') + '): delete it on the toolkit\\'s Pods page');\nconst pod = L.pod || {};\nconst sec = pod.by_this_run ? (Number(vm.uptime_s) > 0 ? Number(vm.uptime_s) : (now - (pod.launched_at ? pod.launched_at * 1000 : L.started_ms)) / 1000) : (now - L.started_ms) / 1000;\nconst gpu_minutes = Math.round((sec / 60) * 10) / 10;\nconst broll = {\n  mode: 'live', variant: L.variant, seconds: L.seconds, clips: F.result.clips, files: F.result.files, notes: F.result.notes, jobs: L.jobs,\n  pod: { name: pod.name || '', product: pod.product || '', by_this_run: !!pod.by_this_run },\n  gpu_minutes, gpu_rate_usd_h: pod.rate_usd_h || 0, gpu_cost_per_toolkit_usd: vm.cost == null ? null : vm.cost, pod_delete,\n  timing: 'the API reports no generation time: a clip\\'s wall_s is the time from the job start (or the clip before it) to the poll that first listed it',\n};\nreturn [{ json: { ...S, broll, slots: F.result.slots } }];\n"
+    "jsCode": "// The pod is deleted (or was already gone). The run state leaves in the shape the stand-in branch's \"done\" gives, plus what the live branch measured.\nconst F = $('B-roll live: finish').first().json;\nconst L = F.live;\nconst S = $('Look: ready').first().json;\nconst C = $('B-roll live: own pod check').first().json;\nconst r = $input.first().json || {};\nconst b = r.body || {};\nconst now = Date.now();\nconst text = (x) => String(x == null ? '' : x).slice(0, 300);\nlet pod_delete = C.pod_delete, vm = { uptime_s: C.uptime_s, cost: C.cost };\nif (C.delete === true) {\n  if (!r.error && r.statusCode === 200) { pod_delete = 'deleted'; vm = { ...vm, ...(b.vm || {}) }; }\n  else if (!r.error && r.statusCode === 409 && /There is no pod|deleting/i.test(String(b.error || ''))) pod_delete = 'already gone: ' + text(b.error);\n  else throw new Error('the GPU pod could not be deleted (' + (r.statusCode || 'no answer') + ': ' + text(b.error || (r.error && (r.error.message || r.error)) || 'no reason given') + '): delete it on the toolkit\\'s Pods page');\n}\nconst pod = L.pod || {};\nconst sec = Number(vm.uptime_s) > 0 ? Number(vm.uptime_s) : (pod.launched_at ? (now - pod.launched_at * 1000) / 1000 : 0);\nconst gpu_minutes = Math.round((sec / 60) * 10) / 10;\nconst rate = pod.rate_usd_h || 0;\nconst broll = {\n  mode: 'live', status: L.status || 'ok', variant: L.variant, seconds: L.seconds, clips: F.result.clips, files: F.result.files, notes: F.result.notes, jobs: L.jobs,\n  pod: { name: pod.name || '', product: pod.product || '' },\n  gpu_minutes, gpu_rate_usd_h: rate, gpu_cost_estimate_usd: Math.round((gpu_minutes / 60) * rate * 10000) / 10000,\n  gpu_cost_note: 'an estimate: gpu_minutes x gpu_rate_usd_h / 60; the toolkit\\'s own figure (gpu_cost_per_toolkit_usd) rounds up to whole hours',\n  gpu_cost_per_toolkit_usd: vm.cost == null ? null : vm.cost, pod_delete,\n  timing: 'the API reports no generation time: a clip\\'s wall_s is the time from the job start (or the clip before it) to the poll that first listed it',\n};\nreturn [{ json: { ...S, broll, slots: F.result.slots } }];\n"
    }
   },
   {
-   "id": "00000186-0000-4000-8000-000000000000",
+   "id": "00000193-0000-4000-8000-000000000000",
    "name": "Note 128",
    "type": "n8n-nodes-base.stickyNote",
    "typeVersion": 1,
@@ -3282,9 +3441,9 @@
     1400
    ],
    "parameters": {
-    "content": "# 3b B-roll, live branch (B-roll = Live)\nToolkit address from `data/config/toolkit.json`; every call carries the `toolkit-machine` credential. **Pod:** the Pods page is read every 30 s; no pod -> refresh the catalog, check `h3-t2v` is listed, deploy it (the Pods page's defaults for that bundle: premium A6000, 8 h cap); a ready pod with h3-t2v is reused; 30 minutes at most until it is ready and its bundles are on disk. **Clips:** one `/api/broll` job for all 12 (a 409 with retry waits and asks again), polled every 15 s, each clip downloaded to `runs/<id>/broll/<hook><A|B|C>_<size>.mp4` like the stand-in. A failed clip is asked for once more with a new seed, then dropped (its slot has no cutaway); no clip at all fails the run. **Then the pod is deleted.** Any failure in this branch ends in the error workflow, which deletes the pod too.",
-    "width": 4900,
-    "height": 120,
+    "content": "# 3b B-roll, live branch (B-roll = Live)\nToolkit address from `data/config/toolkit.json`; every call carries the `toolkit-machine` credential. **Pod:** a pod already on the Pods page stops the run (this branch never uses a pod it did not deploy). No pod -> refresh the catalog, check `h3-t2v` is listed, write `runs/<id>/pod.json` (`requested_at`), deploy (the Pods page's defaults for that bundle: premium A6000, 8 h cap), add the pod's name to pod.json. The Pods page is read every 30 s; a pod that is not ready with its bundles on disk in 45 minutes is deleted and the run goes on with no b-roll (`broll.status` says so). **Clips:** one `/api/broll` job for all 12 (a 409 with retry waits and asks again), polled every 15 s, each clip downloaded to `runs/<id>/broll/<hook><A|B|C>_<size>.mp4` like the stand-in. A failed clip is asked for once more with a new seed, then dropped (its slot has no cutaway); no clip at all fails the run. **Then the pod this run deployed is deleted.** Any failure in this branch ends in the error workflow, which deletes the pod pod.json names, and only that one.",
+    "width": 5000,
+    "height": 160,
     "color": 4
    }
   }
@@ -4711,6 +4870,24 @@
     ],
     [
      {
+      "node": "B-roll live: give up?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll live: give up?": {
+   "main": [
+    [
+     {
+      "node": "B-roll live: finish",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
       "node": "B-roll live: wait for the pod",
       "type": "main",
       "index": 0
@@ -4733,6 +4910,28 @@
    "main": [
     [
      {
+      "node": "B-roll live: pod request",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll live: pod request": {
+   "main": [
+    [
+     {
+      "node": "B-roll live: write pod.json (request)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll live: write pod.json (request)": {
+   "main": [
+    [
+     {
       "node": "B-roll live: POST /api/pods/deploy",
       "type": "main",
       "index": 0
@@ -4752,6 +4951,17 @@
    ]
   },
   "B-roll live: deploy result": {
+   "main": [
+    [
+     {
+      "node": "B-roll live: write pod.json (name)",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll live: write pod.json (name)": {
    "main": [
     [
      {
@@ -4981,7 +5191,47 @@
    "main": [
     [
      {
+      "node": "B-roll live: GET /api/pods before the delete",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll live: GET /api/pods before the delete": {
+   "main": [
+    [
+     {
+      "node": "B-roll live: own pod check",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll live: own pod check": {
+   "main": [
+    [
+     {
+      "node": "B-roll live: delete the pod?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "B-roll live: delete the pod?": {
+   "main": [
+    [
+     {
       "node": "B-roll live: POST /api/pods/delete",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "B-roll live: done",
       "type": "main",
       "index": 0
      }

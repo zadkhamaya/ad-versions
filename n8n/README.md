@@ -5,7 +5,7 @@ Two exported workflows, credentials stripped (names kept):
 | File | Workflow | What it does |
 |---|---|---|
 | `workflow.json` | **ad-versions** | brief form → source clip → beats → scripts → compliance → look line → b-roll (dry run) → render the 18 versions → QA → contact sheet → approval on Telegram (or the form) → package → done message. |
-| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time), then sends a Telegram message (run id, failing node, message cut to 300 characters) and writes `error.json` again with `telegram` (`sent`, `failed: <reason>` or `skipped: no chat id`), then stops; a failure in the trigger itself has no execution id, so its folder is `trigger-<timestamp>`. for a failure in the live b-roll branch it first deletes the GPU pod (below). |
+| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time), then sends a Telegram message (run id, failing node, message cut to 300 characters) and writes `error.json` again with `telegram` (`sent`, `failed: <reason>` or `skipped: no chat id`), then stops; a failure in the trigger itself has no execution id, so its folder is `trigger-<timestamp>`. A failure in the live b-roll branch also deletes the GPU pod this run deployed, in a branch of its own that runs first (see "Live b-roll"). |
 
 Built and tested on n8n **2.46.6** (the tag pinned in `docker/.env`).
 
@@ -277,14 +277,17 @@ Built against the toolkit's `/api/pods` and `/api/broll` (contract: the toolkit'
 `telegram.json`. Every call carries the `toolkit-machine` credential (a Header Auth `Authorization: Bearer <machine token>`; give it the toolkit host as its
 only allowed domain, so the token cannot go anywhere else). The error workflow reads the same file.
 
-**The pod.** `GET /api/pods` every 30 s, at most 30 minutes from the start of the branch (then the run fails with the state it was in).
-- No pod: `POST /api/pods/catalog` (a refresh), stop with a clear error unless `h3-t2v` is listed, then `POST /api/pods/deploy` with what the Pods page sends for a pod
-  with one bundle: `{"cap_hours": 8, "bundles": ["h3-t2v"], "addons": []}` (the page's defaults: the premium A6000, the default image, an 8 h cap; the toolkit's idle timer
-  deletes an unused pod after 30 minutes). A refusal (a 409 such as "the premium A6000 is out of stock, use the plain one?", the balance rail) stops the run with the toolkit's words:
+**The pod.** The branch never uses a pod it did not deploy. `GET /api/pods` first: if the page shows any pod (a ready one, one in use, a build host, one being deleted), the run stops at once with
+`A GPU pod is already running (<name>, <state>). Delete it on the Pods page or choose B-roll: stand-in.` and deletes nothing.
+- No pod: `POST /api/pods/catalog` (a refresh), stop with a clear error unless `h3-t2v` is listed, write `runs/<id>/pod.json` (`requested_at`), then `POST /api/pods/deploy` with what the Pods page sends
+  for a pod with one bundle: `{"cap_hours": 8, "bundles": ["h3-t2v"], "addons": []}` (the page's defaults: the premium A6000, the default image, an 8 h cap), and on the 202 add the pod's `name` to pod.json.
+  A pod.json that cannot be written stops the run before the deploy. A refusal (a 409 such as "the premium A6000 is out of stock, use the plain one?", the balance rail) stops the run with the toolkit's words:
   the plain-A6000 and tunnel questions are the owner's.
-- A pod is there: a ready pod that has `h3-t2v` is reused; a build host, a pod without the bundle, a failed setup stop the run (a build host is never touched).
-  A pod that is booting, or deleting, is waited for (a deleting one is replaced).
-- Ready is not enough: the bundles download after it. The branch waits for the add queue to empty and the Downloader to say `done` (the check `/api/broll` makes itself).
+- Then `GET /api/pods` every 30 s. A different pod, our pod gone or being deleted: the run stops. Ready is not enough: the bundles download after it, so the branch waits for the add queue to empty and the
+  Downloader to say `done` (the check `/api/broll` makes itself).
+- **Not ready in 45 minutes** (spec section 12), or a failed setup or bundle download: no second GPU type. The pod is deleted and the run **goes on with no b-roll**: every slot is empty, `/render` leaves the
+  cutaways out, `run.json` → `broll.status` is `no pod: <reason>`, and report.md's Mode line says `no b-roll (no pod: <reason>)` (the report has no other free-text line for a run, so the Mode line carries it).
+  The pod's minutes still go into the report's cost.
 
 **The clips.** Per hook and shot, two sizes: `<hook><A|B|C>_1344x768.mp4` and `_768x1344.mp4`, the same names the stand-in branch writes, in `runs/<id>/broll/`
 (12 files for two hooks; fewer when compliance dropped a shot). The prompt is the shot, the look line, and `, 24 fps, no people, no text` (spec 4.3); `variant` `turbo8`, 3 seconds,
@@ -296,13 +299,17 @@ is downloaded (the body must be an mp4) and written.
 - A slot needs both sizes: a shot with one size missing leaves its cutaway out (the media service drops a slot that is not sent), and `broll.notes` in run.json says why. If no
   clip at all was made the run fails.
 - `run.json` → `broll`: `clips.<id>` has `wide`, `tall` (paths), `wide_wall_s`, `tall_wall_s`, `wide_tries`, `tall_tries` and `<size>_dropped` (the reason); `jobs` lists each job
-  (clips, state, wall seconds, error); `gpu_minutes`, `gpu_rate_usd_h` (the pod's price, which `/package` and report.md use), `gpu_cost_per_toolkit_usd` (the toolkit's own figure,
-  whole hours), `pod_delete`. **The API reports no generation time**: a clip's `wall_s` is the time from the job start (or the clip before) to the poll that first listed it, so it
-  includes setup for the first clip and is good to about 15 s; clips first listed in one poll share the interval. A reused pod counts only this run's time.
+  (clips, state, wall seconds, error); `status` (`ok` or `no pod: <reason>`), `gpu_minutes`, `gpu_rate_usd_h` (the pod's price, which `/package` and report.md use), `gpu_cost_estimate_usd` (an estimate: minutes x hourly rate / 60, as report.md computes it),
+  `gpu_cost_per_toolkit_usd` (the toolkit's own figure, rounded up to whole hours; which of the two Massed bills on is not confirmed), `pod_delete`. **The API reports no generation time**: a clip's `wall_s` is the time from the job start (or the clip before) to the poll that first listed it, so it
+  includes setup for the first clip and is good to about 15 s; clips first listed in one poll share the interval.
 
-**The clean-up.** After the last clip the branch calls `POST /api/pods/delete` (also for a reused pod). A delete that fails stops the run, so the error workflow tries again and tells you.
-Any failure in a `B-roll live: ...` node ends in the error workflow, which reads the toolkit address, asks `GET /api/pods`, and deletes the pod if one can be deleted now (never a build host),
-best effort; the outcome is `pod_cleanup` in error.json and a line in the Telegram message. Pods that outlive both are caught by the toolkit's 30-minute idle delete and the cap.
+**The clean-up.** After the last clip (or a give-up) the branch reads `GET /api/pods` and calls `POST /api/pods/delete` only when the page shows the pod this run deployed (the name in pod.json); any other pod is left
+alone and noted in `broll.pod_delete`. A delete that fails stops the run, so the error workflow tries again and tells you.
+Any failure in a `B-roll live: ...` node ends in the error workflow. Its pod clean-up is its own branch from the first node (it does not wait for the media service or the disk, and a down media service cannot stop the
+Telegram message): it reads `runs/<id>/pod.json`; with no pod.json it deletes nothing. Otherwise it reads the toolkit address, asks `GET /api/pods`, and deletes the pod only if its name is the one recorded
+(or, when the deploy never answered and only `requested_at` is there, a pod launched after the request); a pod still `launching` cannot be deleted yet, so it asks again every 30 s for up to 10 minutes and then
+logs `left for the idle timer`. A pod it did not deploy, and any build host, is left alone. The outcome is `pod_cleanup` in error.json and a line in the Telegram message. Pods that outlive both are caught by the
+toolkit's 30-minute idle delete and the cap.
 
 ## Not built yet
 

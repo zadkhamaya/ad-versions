@@ -127,9 +127,7 @@ def test_the_done_message_never_fails_the_run():
 
 def test_the_error_workflow_sends_a_message_logs_the_outcome_and_cannot_loop():
     c = ER["connections"]
-    assert targets(c, "Error: write error.json") == ["Error: failed in the live b-roll?"]                      # the pod clean-up first (test_n8n_broll.py), then the message
-    assert targets(c, "Error: failed in the live b-roll?", 1) == ["Error: read Telegram config"]
-    assert targets(c, "Error: record the pod clean-up") == ["Error: read Telegram config"]
+    assert targets(c, "Error: write error.json") == ["Error: read Telegram config"]
     assert targets(c, "Error: Telegram text") == ["Error: chat id read?"]
     assert targets(c, "Error: chat id read?", 0) == ["Error: Telegram message"]
     assert targets(c, "Error: chat id read?", 1) == ["Error: record the Telegram result"]                      # no chat id: no call, logged
