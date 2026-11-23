@@ -15,6 +15,7 @@ from `brand/` (read-only).
 | B-roll | `runs/<run_id>/broll/<clip>_<w>x<h>.mp4`: `<clip>_1344x768.mp4` (wide, for 16X9 and 1X1) and `<clip>_768x1344.mp4` (tall, for 9X16) |
 | Cached voice-over | `runs/<run_id>/vo/<hash>.wav` (one per script; the 18 versions share 6) |
 | Frames, sheets | `runs/<run_id>/frames/<clip>_<hash>_<tag>.jpg`; a sheet goes where `out` says |
+| Reframe | `runs/<run_id>/reframe.json` (cached suggestions), `runs/<run_id>/reframe.jpg` (the `/reframe` sheet) |
 | Package | `runs/<run_id>/package/` (the files renamed by the naming convention, `manifest.json`, `manifest.csv`, `report.md`, `index.html`) |
 | Brand inputs | `brand/music.m4a` (the music bed) and `brand/logo.png` (optional) under the data root |
 
@@ -41,8 +42,8 @@ seconds; `/health` never waits.
 ## POST /render
 
 Renders one version and writes `renders/<version>.mp4` (a failed or refused render removes any older file of that name).
-Fields: `run_id`, `version`, `source` (the clip), `beats` (`name` S1 to S6, `start`, `end` in seconds, `role`, `face`
-`left`/`centre`/`center`/`right`), `broll` (`{"slot1": {"wide": path, "tall": path}}`; a missing slot drops that cutaway),
+Fields: `run_id`, `version`, `source` (the clip), `beats` (`name` S1 to S6, `start`, `end` in seconds, `role`, `face`, `x`:
+see "Crop position" below), `broll` (`{"slot1": {"wide": path, "tall": path}}`; a missing slot drops that cutaway),
 `vo_text` (the approved voice-over script, also what the captions show), `disclaimer` (burned into the end card), `music`,
 optional `logo` and `brand`.
 
@@ -57,11 +58,56 @@ optional `logo` and `brand`.
 Answer: `{"file": "runs/r1/renders/H1_15S_9X16.mp4", "log": {...}}`. The log:
 
 - `reasons`: strings for problems that do not stop the render and should fail QA: `b-roll colour`,
-  `voice-over X.X s, longer than the Y.Y s before the end card`, `captions from transcript (script alignment failed)`.
+  `voice-over X.X s, longer than the Y.Y s before the end card`, `captions from transcript (script alignment failed)`,
+  `crop split action in S4 (9X16)` (a beat with `face: "auto"` whose action sits in two places the crop window cannot hold together).
+- `reframe` (only when a beat had `face: "auto"` and its crop window can move): `{"S4": {"9X16": {"x", "coverage", "faces", "split", "span"}}}`,
+  the suggestion that was used for each such beat and format (fields as in `POST /reframe`).
 - `vo_s`, `vo_cached` (true when the voice came from this run's cache), `vo_execution_ms` (the voice job's GPU time, only
   when a job ran and RunPod reported it), `caption_wer` (script against what Whisper heard).
 - `segments`, `broll_match` (colour distance before and after the grade), `endcard`, `finish` (loudness measured,
   limiter, room tone: `mixed` or `skipped: ...`, the ffmpeg commands).
+
+### Crop position
+
+A 16:9 source cut to 9:16 (a 608 px band of 1920) or 1:1 (1080 px) needs a window position per beat. Each beat has:
+
+- `face`: `"left"`, `"centre"` (or `"center"`), `"right"`, `"auto"`, or a number from 0 to 1: the window's centre as a
+  fraction of the source width. A number that would push the window out of the frame is clamped to the edge; the offset is rounded to
+  an even pixel (4:2:0). Default `"centre"`.
+- `x`: optional `{"9X16": 0.21, "1X1": 0.4}`, a centre per format; it wins over `face` for that format (even over `"auto"`).
+- `"auto"` has the service look at the beat for the format (`media/reframe.py`): motion that survives a blur (film grain is not
+  motion) plus detected faces (counted twice as much as all the motion), and the window goes where it covers the most. The
+  suggestion is cached in `runs/<run_id>/reframe.json` by source file, beat (name and span) and format, so the other versions
+  of a run, and `POST /reframe`, do not read the frames again.
+
+A 16:9 output from a 16:9 source ignores all of it. Anything outside 0 to 1, or an `x` key other than `9X16`/`1X1`, is a 422.
+
+## POST /reframe
+
+Suggested crop windows for the beats of a source clip, and a sheet to look at them. It reads about a dozen frames per beat
+(about 3 s a beat on a 1080p clip on the dev box, once; cached after that). It does not take a render slot.
+Fields: `run_id`, `source`, `beats` (1 to 12, each `name`, `start`, `end`, as in `/render`; names must differ; a beat's `face` other
+than `"auto"`, or its `x`, is a position that was given), `formats` (`["9X16", "1X1"]` by default, or one of them).
+
+```json
+{"run_id": "r1", "source": "runs/r1/source.mp4",
+ "beats": [{"name": "S1", "start": 0.2, "end": 4.8}, {"name": "S4", "start": 15.2, "end": 19.8, "x": {"9X16": 0.2}}],
+ "formats": ["9X16", "1X1"]}
+```
+
+Answer: `{"beats": {"S1": {"9X16": {...}, "1X1": {...}}, "S4": {...}}, "sheet": "runs/r1/reframe.jpg"}`. A suggestion is
+`{"x": 0.47, "coverage": 0.99, "faces": [0.49], "split": false, "span": [0.46, 0.53]}`:
+
+- `x`: where the window's centre should be (fraction of the width); the number to send as `face` or `x`.
+- `coverage`: the share of the motion and faces the window holds (1.0 for a still shot with no face, which is also `x` 0.5).
+- `faces`: the x centres of the faces found.
+- `split`: true when the action sits in two clusters with a gap between them (at least 25 % of it on each side of a gap of
+  10 % of the width holding under 3 %) and the window covers under 85 %. `/render` adds the reason `crop split action in S4 (9X16)`.
+- `span`: the 10 to 90 % range of the action, as fractions of the width.
+
+A position that was given comes back as `{"x": 0.5, "set": true}` (the window's centre as it will be cropped). The sheet has one
+row per beat, 640 px wide: the beat's middle frame, the 9:16 window outlined in yellow and the 1:1 window in cyan, the beat name,
+a label per box (`9X16 x0.17`, or `9X16 set 0.50`) and `SPLIT` in red on a flagged beat. Beats must end inside the clip (422).
 
 ## POST /check
 
