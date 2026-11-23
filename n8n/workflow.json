@@ -85,14 +85,46 @@
        "placeholder": "optional: one line that replaces the look line written from the clip"
       },
       {
-       "fieldLabel": "Dry run",
-       "fieldType": "checkbox",
+       "fieldLabel": "Landing URL",
+       "fieldType": "text",
        "requiredField": false,
-       "defaultValue": "Dry run: stand-in b-roll, no GPU",
+       "placeholder": "optional: https:// address the ads link to (fills Link in manifest.csv)"
+      },
+      {
+       "fieldLabel": "Call to action",
+       "fieldType": "text",
+       "requiredField": false,
+       "defaultValue": "Learn More",
+       "placeholder": "Meta's button text; Learn More is our guess, change it if the client says otherwise"
+      },
+      {
+       "fieldLabel": "Voice",
+       "fieldType": "dropdown",
+       "requiredField": false,
+       "defaultValue": "Stand-in (free, flite)",
        "fieldOptions": {
         "values": [
          {
-          "option": "Dry run: stand-in b-roll, no GPU"
+          "option": "Stand-in (free, flite)"
+         },
+         {
+          "option": "Real (RunPod)"
+         }
+        ]
+       }
+      },
+      {
+       "fieldLabel": "B-roll",
+       "fieldType": "dropdown",
+       "requiredField": false,
+       "defaultValue": "Stand-in clips (no GPU)",
+       "fieldOptions": {
+        "values": [
+         {
+          "option": "Stand-in clips (no GPU)"
+         },
+         {
+          "option": "Live (pods)"
          }
         ]
        }
@@ -121,7 +153,7 @@
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "// Brief form answers -> the run: id, brief fields, dry-run switch, link or upload.\nconst item = $input.first();\nconst f = item.json;\nconst run_id = String($execution.id);\nif (!/^[A-Za-z0-9_-]{1,64}$/.test(run_id)) throw new Error('execution id ' + run_id + ' is not a valid run id');\nconst txt = (k) => String(f[k] == null ? '' : f[k]).trim();\nconst brief = {\n  brand: txt('Brand'), product: txt('Product'), audience: txt('Audience'), offer: txt('Offer'),\n  key_messages: [txt('Key message 1'), txt('Key message 2'), txt('Key message 3')].filter(Boolean),\n  disclaimer: txt('Required disclaimer'), look: txt('Look'), beats: String(f['Beats'] == null ? '' : f['Beats']),\n};\nfor (const k of ['brand', 'product', 'offer']) if (!brief[k]) throw new Error('the brief needs a ' + k);\nif (brief.key_messages.length < 3) throw new Error('the brief needs 3 key messages');\nif (!brief.beats.trim()) throw new Error('the brief needs beats');\nconst link = txt('Source clip link');\nif (link && !/^https:\\/\\/\\S+$/i.test(link)) throw new Error('Source clip link must be an https:// address (no spaces)');\nconst bin = item.binary || {};\nconst key = Object.keys(bin)[0];\nif (!link && !key) throw new Error('give a source clip: upload a file or paste an https link');\n// the dry-run checkbox arrives as a JSON array: [] (unticked) means a live run; a missing field means dry (safe default)\nconst dr = f['Dry run'];\nconst dry_run = Array.isArray(dr) ? dr.length > 0 : true;\nreturn [{ json: { run_id, brief, dry_run, link, source_origin: link ? 'link' : 'upload' }, binary: link ? {} : { data: bin[key] } }];\n"
+    "jsCode": "// Brief form answers -> the run: id, brief fields, voice and b-roll switches, link or upload.\nconst item = $input.first();\nconst f = item.json;\nconst run_id = String($execution.id);\nif (!/^[A-Za-z0-9_-]{1,64}$/.test(run_id)) throw new Error('execution id ' + run_id + ' is not a valid run id');\nconst txt = (k) => String(f[k] == null ? '' : f[k]).trim();\nconst brief = {\n  brand: txt('Brand'), product: txt('Product'), audience: txt('Audience'), offer: txt('Offer'),\n  key_messages: [txt('Key message 1'), txt('Key message 2'), txt('Key message 3')].filter(Boolean),\n  disclaimer: txt('Required disclaimer'), look: txt('Look'), beats: String(f['Beats'] == null ? '' : f['Beats']),\n};\nfor (const k of ['brand', 'product', 'offer']) if (!brief[k]) throw new Error('the brief needs a ' + k);\nif (brief.key_messages.length < 3) throw new Error('the brief needs 3 key messages');\nif (!brief.beats.trim()) throw new Error('the brief needs beats');\nconst link = txt('Source clip link');\nif (link && !/^https:\\/\\/\\S+$/i.test(link)) throw new Error('Source clip link must be an https:// address (no spaces)');\nconst bin = item.binary || {};\nconst key = Object.keys(bin)[0];\nif (!link && !key) throw new Error('give a source clip: upload a file or paste an https link');\n// Voice and B-roll are separate switches, both defaulting to the stand-in (a missing field is the stand-in, the safe default).\n// The old single \"Dry run\" checkbox is still honoured when a script posts it: [] (unticked) meant live b-roll and the real voice.\nconst legacy = f['Dry run'];\nconst voice_mode = (Array.isArray(legacy) && legacy.length === 0) || /^real/i.test(txt('Voice')) ? 'real' : 'stand-in';\nconst broll_mode = (Array.isArray(legacy) && legacy.length === 0) || /^live/i.test(txt('B-roll')) ? 'live' : 'stand-in';\nconst dry_run = broll_mode !== 'live';        // the b-roll switch of the first half: stand-in clips, no pods\nconst landing = txt('Landing URL');\nif (landing && !/^https:\\/\\/\\S+$/i.test(landing)) throw new Error('Landing URL must be an https:// address (no spaces)');\nbrief.landing_url = landing; brief.cta = txt('Call to action') || 'Learn More';\nreturn [{ json: { run_id, brief, dry_run, voice_mode, broll_mode, link, source_origin: link ? 'link' : 'upload' }, binary: link ? {} : { data: bin[key] } }];\n"
    }
   },
   {
@@ -1100,7 +1132,7 @@
     1666.0000000000002
    ],
    "parameters": {
-    "errorMessage": "Live b-roll (pods and the toolkit's /api/broll) is not built yet: run with Dry run ticked."
+    "errorMessage": "Live b-roll (pods and the toolkit's /api/broll) is not built yet: set B-roll to 'Stand-in clips (no GPU)' on the brief form."
    }
   },
   {
@@ -1242,17 +1274,81 @@
    }
   },
   {
+   "id": "00000124-0000-4000-8000-000000000000",
+   "name": "Note 124",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -40,
+    1850
+   ],
+   "parameters": {
+    "content": "# 4 Render and QA\nOne version at a time through `/render` (stand-in or real voice), `/check`, `/transcribe` (the brand as a hotword, the line as the script to compare with), `/frames` of the last frame and a vision read of the end card's disclaimer. QA reasons merge as docs/api.md says; a render error makes that version `failed` and the loop goes on. One at a time because the service renders one at a time (an HTTP node with many items fires them all at once); a render that times out here leaves the service rendering and the next request queues behind it.",
+    "width": 2400,
+    "height": 830,
+    "color": 5
+   }
+  },
+  {
+   "id": "00000125-0000-4000-8000-000000000000",
+   "name": "Note 125",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -40,
+    2700
+   ],
+   "parameters": {
+    "content": "# 5 Contact sheet and approval\n`/sheet` (green PASS or red FAIL on each cell), then a Wait node resumed by a form: summary, the sheet, every version with its QA, passed ones pre-ticked. A failed version can be ticked only with a note `VERSION: why`. Wait limit 7 days; no submission = expired, nothing packaged. The form URL and the sheet link are in run.json.\nThe two disabled Telegram nodes below replace the form once the `telegram-demo` credential exists. When enabling them: sendPhoto needs the sheet as binary (read the file first, send that), and `$env.TELEGRAM_DEMO_CHAT_ID` is blocked unless the container allows env access (use a credential field or a Set node instead).",
+    "width": 1700,
+    "height": 640,
+    "color": 6
+   }
+  },
+  {
+   "id": "00000126-0000-4000-8000-000000000000",
+   "name": "Note 126",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    1700,
+    2700
+   ],
+   "parameters": {
+    "content": "# 6 Package\n`/package` with approved items (and their notes), rejected items with the reason, and the run's facts (mode, times, costs, link, CTA). Stand-in b-roll: no upload (the media service has no R2 environment yet). A failed package ends the run in error (error workflow); nothing approved or an expired form ends it normally. The answer goes into run.json.",
+    "width": 2050,
+    "height": 640,
+    "color": 4
+   }
+  },
+  {
+   "id": "00000127-0000-4000-8000-000000000000",
+   "name": "Note 127",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -40,
+    3400
+   ],
+   "parameters": {
+    "content": "# 7 Contact sheet link (public)\nGET `/webhook/ad-versions-sheet?run=<id>&token=<32 hex>`. The token (128 random bits, made in Render: plan, stored in run.json) is the only protection: the `/webhook` path is public through the tunnel by design. Wrong or missing token, wrong run: 404. Only `runs/<id>/sheet.jpg` is ever served.",
+    "width": 1700,
+    "height": 470,
+    "color": 3
+   }
+  },
+  {
    "id": "00000081-0000-4000-8000-000000000000",
    "name": "Render: plan",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
     0,
-    1950
+    2040
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// The 18 versions in naming.matrix() order; a version whose hook or length line was dropped is not made, and says why.\nconst S = $input.first().json;\nconst HOOKS = ['H1', 'H2'], LENGTHS = [6, 15, 30], FORMATS = ['9X16', '1X1', '16X9'];\nconst items = [], notMade = [];\nfor (const h of HOOKS) for (const l of LENGTHS) for (const f of FORMATS) {\n  const version = h + '_' + l + 'S_' + f;\n  const hook = (S.hooks || []).find((x) => x.id === h);\n  const line = hook && hook.lines && hook.lines[String(l)];\n  if (!hook) { notMade.push({ version, hook: h, length_s: l, fmt: f, reason: 'hook ' + h + ' was dropped by the compliance pass' }); continue; }\n  if (!line) { notMade.push({ version, hook: h, length_s: l, fmt: f, reason: 'the ' + l + ' s line of ' + h + ' was dropped by the compliance pass' }); continue; }\n  const body = {\n    run_id: S.run_id, version, source: S.source, beats: S.beats, vo_text: line, disclaimer: S.disclaimer,\n    music: 'brand/music.m4a', brand: S.rulebook.brand, voice: S.dry_run ? 'stub' : 'runpod',\n  };\n  const slots = (S.slots && S.slots[h]) || {};\n  if (l !== 6 && Object.keys(slots).length) body.broll = slots;      // the 6 s edit has no cutaway: the field stays out\n  items.push({ json: { version, hook: h, length_s: l, fmt: f, line, body } });\n}\nif (!items.length) throw new Error('render: no version can be made (every hook was dropped)');\nitems.forEach((i) => { i.json.not_made = notMade; });\nreturn items;\n"
+    "jsCode": "// The 18 versions in naming.matrix() order; a version whose hook or length line was dropped is not made, and says why.\nconst S = $input.first().json;\nconst HOOKS = ['H1', 'H2'], LENGTHS = [6, 15, 30], FORMATS = ['9X16', '1X1', '16X9'];\nconst items = [], notMade = [];\nfor (const h of HOOKS) for (const l of LENGTHS) for (const f of FORMATS) {\n  const version = h + '_' + l + 'S_' + f;\n  const hook = (S.hooks || []).find((x) => x.id === h);\n  const line = hook && hook.lines && hook.lines[String(l)];\n  if (!hook) { notMade.push({ version, hook: h, length_s: l, fmt: f, reason: 'hook ' + h + ' was dropped by the compliance pass' }); continue; }\n  if (!line) { notMade.push({ version, hook: h, length_s: l, fmt: f, reason: 'the ' + l + ' s line of ' + h + ' was dropped by the compliance pass' }); continue; }\n  const body = {\n    run_id: S.run_id, version, source: S.source, beats: S.beats, vo_text: line, disclaimer: S.disclaimer,\n    music: 'brand/music.m4a', brand: S.rulebook.brand, voice: S.voice_mode === 'real' ? 'runpod' : 'stub',\n  };\n  const slots = (S.slots && S.slots[h]) || {};\n  if (l !== 6 && Object.keys(slots).length) body.broll = slots;      // the 6 s edit has no cutaway: the field stays out\n  items.push({ json: { version, hook: h, length_s: l, fmt: f, line, body } });\n}\nif (!items.length) throw new Error('render: no version can be made (every hook was dropped)');\n// a random per-run token (128 bits) for the contact sheet's public link; it goes to run.json with the form URL\nconst sheet_token = require('crypto').randomBytes(16).toString('hex');\nitems.forEach((i) => { i.json.not_made = notMade; i.json.sheet_token = sheet_token; });\nreturn items;\n"
    }
   },
   {
@@ -1262,7 +1358,7 @@
    "typeVersion": 3,
    "position": [
     230,
-    1950
+    2040
    ],
    "parameters": {
     "batchSize": 1,
@@ -1276,7 +1372,7 @@
    "typeVersion": 4.2,
    "position": [
     460,
-    2050
+    2040
    ],
    "parameters": {
     "method": "POST",
@@ -1305,11 +1401,11 @@
    "typeVersion": 2,
    "position": [
     690,
-    2050
+    2040
    ],
    "parameters": {
     "mode": "runOnceForEachItem",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// POST /render answered (or did not): keep the state, the file and the log's reasons; a failure becomes `failed`, never a stop.\nconst it = $('Render: loop').item.json;\nconst r = $input.item.json;\nconst ok = httpOk(r) && typeof r.body.file === 'string';\nconst log = (ok ? r.body.log : (r.body && r.body.log)) || {};\nconst { body, ...rest } = it;\nconst error = ok ? null : httpFail(r);\nreturn { json: {\n  ...rest,\n  render: { ok, file: ok ? r.body.file : null, error, reasons: ok ? (log.reasons || []) : ['render failed: ' + error],\n    log: { voice: log.voice, vo_s: log.vo_s, vo_cached: log.vo_cached, caption_wer: log.caption_wer, broll_match: log.broll_match } },\n  check_body: ok ? { file: r.body.file, version: it.version } : null,\n} };\n"
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n// POST /render answered (or did not): keep the state, the file and the log's reasons; a failure becomes `failed`, never a stop.\nconst it = $('Render: loop').item.json;\nconst r = $input.item.json;\nconst ok = httpOk(r) && typeof r.body.file === 'string';\nconst log = (ok ? r.body.log : (r.body && r.body.log)) || {};\nconst { body, ...rest } = it;\nconst error = ok ? null : httpFail(r);\nreturn { json: {\n  ...rest,\n  render: { ok, file: ok ? r.body.file : null, error, reasons: ok ? (log.reasons || []) : ['render failed: ' + error],\n    log: { voice: log.voice, vo_s: log.vo_s, vo_cached: log.vo_cached, caption_wer: log.caption_wer, broll_match: log.broll_match } },\n  check_body: ok ? { file: r.body.file, version: it.version } : null,\n} };\n"
    }
   },
   {
@@ -1319,7 +1415,7 @@
    "typeVersion": 2.2,
    "position": [
     920,
-    2050
+    2040
    ],
    "parameters": {
     "conditions": {
@@ -1353,7 +1449,7 @@
    "typeVersion": 4.2,
    "position": [
     0,
-    2270
+    2260
    ],
    "parameters": {
     "method": "POST",
@@ -1382,11 +1478,11 @@
    "typeVersion": 2,
    "position": [
     230,
-    2270
+    2260
    ],
    "parameters": {
     "mode": "runOnceForEachItem",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\nconst it = $('Render: result').item.json;\nconst r = $input.item.json;\nconst ok = httpOk(r);\nconst check = ok ? { ran: true, passed: r.body.passed === true, reasons: r.body.reasons || [], measured: r.body.measured || null }\n  : { ran: false, passed: false, reasons: ['technical check did not run: ' + httpFail(r)], measured: null };\nreturn { json: { ...it, check, transcribe_body: { file: it.render.file, version: it.version, script: it.line } } };\n"
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\nconst it = $('Render: result').item.json;\nconst r = $input.item.json;\nconst ok = httpOk(r);\nconst check = ok ? { ran: true, passed: r.body.passed === true, reasons: r.body.reasons || [], measured: r.body.measured || null }\n  : { ran: false, passed: false, reasons: ['technical check did not run: ' + httpFail(r)], measured: null };\n// the brand name as a hotword (a made-up name is what the model gets wrong); never the script. Brand only: adding the product\n// phrase made the model repeat sentences (WER 1.0) in 2 of 18 versions of a full run.\nconst brief = $('Run: state for 12b').first().json.brief;\nconst hotwords = clip(brief.brand, 300);\nconst transcribe_body = { file: it.render.file, version: it.version, script: it.line };\nif (hotwords) transcribe_body.hotwords = hotwords;\nreturn { json: { ...it, check, transcribe_body } };\n"
    }
   },
   {
@@ -1396,7 +1492,7 @@
    "typeVersion": 4.2,
    "position": [
     460,
-    2270
+    2260
    ],
    "parameters": {
     "method": "POST",
@@ -1425,11 +1521,11 @@
    "typeVersion": 2,
    "position": [
     690,
-    2270
+    2260
    ],
    "parameters": {
     "mode": "runOnceForEachItem",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\nconst it = $('QA: after check').item.json;\nconst r = $input.item.json;\nconst ok = httpOk(r);\nconst transcribe = ok ? { ran: true, passed: r.body.passed === true, reasons: r.body.reasons || [], wer: r.body.wer, banned: r.body.banned || [], text: r.body.text }\n  : { ran: false, passed: false, reasons: ['final-audio check did not run: ' + httpFail(r)], wer: null, banned: [], text: null };\nreturn { json: { ...it, transcribe, frames_body: { file: it.render.file, at: 'last' } } };\n"
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\nconst it = $('QA: after check').item.json;\nconst r = $input.item.json;\nconst ok = httpOk(r);\nconst transcribe = ok ? { ran: true, passed: r.body.passed === true, reasons: r.body.reasons || [], wer: r.body.wer, banned: r.body.banned || [], text: r.body.text }\n  : { ran: false, passed: false, reasons: ['final-audio check did not run: ' + httpFail(r)], wer: null, banned: [], text: null };\nreturn { json: { ...it, transcribe, frames_body: { file: it.render.file, at: 'last' } } };\n"
    }
   },
   {
@@ -1439,7 +1535,7 @@
    "typeVersion": 4.2,
    "position": [
     920,
-    2270
+    2260
    ],
    "parameters": {
     "method": "POST",
@@ -1468,11 +1564,11 @@
    "typeVersion": 2,
    "position": [
     1150,
-    2270
+    2260
    ],
    "parameters": {
     "mode": "runOnceForEachItem",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\nconst it = $('QA: after transcribe').item.json;\nconst r = $input.item.json;\nconst ok = httpOk(r) && Array.isArray(r.body.files) && r.body.files.length;\n// the last frame of the finished file (the end card), as a path the read node can open\nreturn { json: { ...it, end_card: ok ? { file: r.body.files[0], path: '/data/' + r.body.files[0] } : { file: null, path: '/data/none', error: httpFail(r) } } };\n"
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\nconst it = $('QA: after transcribe').item.json;\nconst r = $input.item.json;\nconst ok = httpOk(r) && Array.isArray(r.body.files) && r.body.files.length;\n// the last frame of the finished file (the end card), as a path the read node can open\nreturn { json: { ...it, end_card: ok ? { file: r.body.files[0], path: '/data/' + r.body.files[0] } : { file: null, path: '/data/none', error: httpFail(r) } } };\n"
    }
   },
   {
@@ -1482,7 +1578,7 @@
    "typeVersion": 1.1,
    "position": [
     1380,
-    2270
+    2260
    ],
    "parameters": {
     "operation": "read",
@@ -1500,11 +1596,11 @@
    "typeVersion": 2,
    "position": [
     1610,
-    2270
+    2260
    ],
    "parameters": {
     "mode": "runOnceForEachItem",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\nconst it = $('QA: end card file').item.json;\nlet buf = null;\ntry { buf = await this.helpers.getBinaryDataBuffer($itemIndex, 'data'); } catch (e) { buf = null; }\nif (!buf) return { json: { ...it, body: null, vision_error: 'the end card frame could not be read' + (it.end_card.error ? ' (' + it.end_card.error + ')' : '') } };\nconst parts = [\n  { type: 'text', text: 'This is the last frame of a short video ad: an end card with a brand name and a small-print disclaimer. Read the disclaimer text and return it exactly as printed, as one string (line breaks become single spaces). Do not add, correct or complete anything. If no disclaimer is legible, return an empty string.' },\n  { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + buf.toString('base64') } },\n];\nconst schema = { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string' } } };\nconst body = { model: MODEL, messages: [{ role: 'user', content: parts }],\n  response_format: { type: 'json_schema', json_schema: { name: 'end_card_text', strict: true, schema } } };\nreturn { json: { ...it, body } };\n"
+    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst it = $('QA: end card file').item.json;\nlet buf = null;\ntry { buf = await this.helpers.getBinaryDataBuffer($itemIndex, 'data'); } catch (e) { buf = null; }\nif (!buf) return { json: { ...it, body: null, vision_error: 'the end card frame could not be read' + (it.end_card.error ? ' (' + it.end_card.error + ')' : '') } };\nconst parts = [\n  { type: 'text', text: 'This is the last frame of a short video ad: an end card with a brand name and a small-print disclaimer. Read the disclaimer text and return it exactly as printed, as one string (line breaks become single spaces). Do not add, correct or complete anything. If no disclaimer is legible, return an empty string.' },\n  { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,' + buf.toString('base64') } },\n];\nconst schema = { type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string' } } };\nconst body = { model: MODEL, messages: [{ role: 'user', content: parts }],\n  response_format: { type: 'json_schema', json_schema: { name: 'end_card_text', strict: true, schema } } };\nreturn { json: { ...it, body } };\n"
    }
   },
   {
@@ -1514,7 +1610,7 @@
    "typeVersion": 4.2,
    "position": [
     1840,
-    2270
+    2260
    ],
    "parameters": {
     "method": "POST",
@@ -1546,11 +1642,11 @@
    "typeVersion": 2,
    "position": [
     2070,
-    2270
+    2260
    ],
    "parameters": {
     "mode": "runOnceForEachItem",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// The version's QA as docs/api.md \"How qa is merged\": render log reasons + /check + /transcribe + the end card read back.\nconst it = $('QA: vision prompt').item.json;\nconst r = $input.item.json;\nconst S = $('Run: state for 12b').first().json;\nconst norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^\\p{L}\\p{N}]+/gu, ' ').trim();\nlet read = null, readError = null;\nif (it.vision_error) readError = it.vision_error;\nelse try { const t = parseJson(llmText(r)).text; read = String(t == null ? '' : t); } catch (e) { readError = it.vision_error || (r.error ? httpFail(r) : 'no readable answer'); }\nconst reasons = [...it.render.reasons, ...it.check.reasons, ...it.transcribe.reasons];\nconst matches = read !== null && norm(read) === norm(S.disclaimer);\nif (readError) reasons.push('end card: the disclaimer could not be read back (' + readError + ')');\nelse if (!matches) reasons.push('end card: the disclaimer read back differs from the approved text (\"' + clip(read, 120) + '\")');\nconst { body, ...rest } = it;\nreturn { json: {\n  version: it.version, hook: it.hook, length_s: it.length_s, fmt: it.fmt, line: it.line, not_made: it.not_made,\n  status: reasons.length ? 'failed' : 'passed', file: it.render.file,\n  qa: { passed: reasons.length === 0, reasons },\n  render: it.render.log, measured: it.check.measured, transcribe: { wer: it.transcribe.wer, banned: it.transcribe.banned, text: it.transcribe.text },\n  end_card: { file: it.end_card.file, read, matches, error: readError },\n  llm_usd: cost(r),\n} };\n"
+    "jsCode": "const llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\n// The version's QA as docs/api.md \"How qa is merged\": render log reasons + /check + /transcribe + the end card read back.\nconst it = $('QA: vision prompt').item.json;\nconst r = $input.item.json;\nconst S = $('Run: state for 12b').first().json;\nconst norm = (s) => String(s == null ? '' : s).toLowerCase().replace(/[^\\p{L}\\p{N}]+/gu, ' ').trim();\nlet read = null, readError = null;\nif (it.vision_error) readError = it.vision_error;\nelse try { const t = parseJson(llmText(r)).text; read = String(t == null ? '' : t); } catch (e) { readError = it.vision_error || (r.error ? httpFail(r) : 'no readable answer'); }\n// a check that failed with no reason of its own still leaves one: a failure is never silent\nconst why = (ok, rs, what) => (ok || rs.length ? rs : [what + ' failed with no reason given']);\nconst reasons = [...it.render.reasons, ...why(it.check.passed, it.check.reasons, 'technical check'), ...why(it.transcribe.passed, it.transcribe.reasons, 'final-audio check')];\nconst matches = read !== null && norm(read) === norm(S.disclaimer);\nif (readError) reasons.push('end card: the disclaimer could not be read back (' + readError + ')');\nelse if (!matches) reasons.push('end card: the disclaimer read back differs from the approved text (\"' + clip(read, 120) + '\")');\nconst { body, ...rest } = it;\nreturn { json: {\n  version: it.version, hook: it.hook, length_s: it.length_s, fmt: it.fmt, line: it.line, not_made: it.not_made,\n  status: reasons.length ? 'failed' : 'passed', file: it.render.file,\n  qa: { passed: reasons.length === 0, reasons },\n  render: it.render.log, measured: it.check.measured, transcribe: { wer: it.transcribe.wer, banned: it.transcribe.banned, text: it.transcribe.text },\n  end_card: { file: it.end_card.file, read, matches, error: readError },\n  llm_usd: cost(r),\n} };\n"
    }
   },
   {
@@ -1564,7 +1660,7 @@
    ],
    "parameters": {
     "mode": "runOnceForEachItem",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// The render itself failed: the version is failed with the service's error, and the run goes on.\nconst it = $('Render: result').item.json;\nreturn { json: {\n  version: it.version, hook: it.hook, length_s: it.length_s, fmt: it.fmt, line: it.line, not_made: it.not_made,\n  status: 'failed', file: null, qa: { passed: false, reasons: it.render.reasons },\n  render: it.render.log, measured: null, transcribe: null, end_card: null, llm_usd: 0,\n} };\n"
+    "jsCode": "// The render itself failed: the version is failed with the service's error, and the run goes on.\nconst it = $('Render: result').item.json;\nreturn { json: {\n  version: it.version, hook: it.hook, length_s: it.length_s, fmt: it.fmt, line: it.line, not_made: it.not_made,\n  status: 'failed', file: null, qa: { passed: false, reasons: it.render.reasons },\n  render: it.render.log, measured: null, transcribe: null, end_card: null, llm_usd: 0,\n} };\n"
    }
   },
   {
@@ -1574,11 +1670,11 @@
    "typeVersion": 2,
    "position": [
     0,
-    2750
+    2950
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// Every version is back from the loop (in matrix order): the contact sheet gets the files that were rendered.\nconst results = $input.all().map((i) => i.json);\nconst S = $('Run: state for 12b').first().json;\nconst files = results.filter((r) => r.file).map((r) => r.file);\nif (!files.length) throw new Error('no version could be rendered: ' + results.map((r) => r.version + ': ' + r.qa.reasons[0]).slice(0, 3).join(' | '));\nconst { not_made } = results[0];\nconst clean = results.map(({ not_made: _n, ...r }) => r);\nreturn [{ json: { results: clean, not_made, files, body: { files, out: 'runs/' + S.run_id + '/sheet.jpg' } } }];\n"
+    "jsCode": "// Every version is back from the loop (in matrix order): the contact sheet gets the files that were rendered.\nconst results = $input.all().map((i) => i.json);\nconst S = $('Run: state for 12b').first().json;\nconst files = results.filter((r) => r.file).map((r) => r.file);\nif (!files.length) throw new Error('no version could be rendered (' + results.length + ' failed): ' + [...new Set(results.map((r) => r.qa.reasons[0]))].slice(0, 3).join(' | '));\nconst { not_made } = results[0];\nconst sheet_token = $('Render: plan').first().json.sheet_token;\nconst clean = results.map(({ not_made: _n, ...r }) => r);\nconst status = results.filter((r) => r.file).map((r) => (r.status === 'passed' ? 'pass' : 'fail'));      // a green or red mark per cell\nreturn [{ json: { results: clean, not_made, files, sheet_token, body: { files, status, out: 'runs/' + S.run_id + '/sheet.jpg' } } }];\n"
    }
   },
   {
@@ -1588,7 +1684,7 @@
    "typeVersion": 4.2,
    "position": [
     230,
-    2750
+    2950
    ],
    "parameters": {
     "method": "POST",
@@ -1617,11 +1713,11 @@
    "typeVersion": 2,
    "position": [
     460,
-    2750
+    2950
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// The summary line, the table for the form and the pre-ticked versions; the resume URL goes to run.json next.\nconst R = $('Sheet: body').first().json;\nconst sh = $input.first().json;\nconst S = $('Run: state for 12b').first().json;\nconst esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst sheet = httpOk(sh) && sh.body.file ? { file: sh.body.file } : { file: null, error: httpFail(sh) };\nconst byId = Object.fromEntries(R.results.map((r) => [r.version, r]));\nconst notMadeById = Object.fromEntries(R.not_made.map((n) => [n.version, n]));\nconst HOOKS = ['H1', 'H2'], LENGTHS = [6, 15, 30], FORMATS = ['9X16', '1X1', '16X9'];\nconst all = [];\nfor (const h of HOOKS) for (const l of LENGTHS) for (const f of FORMATS) all.push(h + '_' + l + 'S_' + f);\nconst passed = R.results.filter((r) => r.status === 'passed');\nconst failed = R.results.filter((r) => r.status === 'failed');\nconst first = (r) => r.version + ': ' + clip(r.qa.reasons[0], 90);\nlet summary = all.length + ' versions: ' + passed.length + ' passed, ' + failed.length + ' failed';\nif (failed.length) summary += ' (' + failed.slice(0, 5).map(first).join('; ') + (failed.length > 5 ? '; …' : '') + ')';\nif (R.not_made.length) summary += ', ' + R.not_made.length + ' not made';\nconst rows = all.map((v) => {\n  const r = byId[v];\n  if (!r) return '<tr><td>' + esc(v) + '</td><td>not made</td><td>' + esc(notMadeById[v] ? notMadeById[v].reason : '') + '</td></tr>';\n  return '<tr><td>' + esc(v) + '</td><td>' + (r.status === 'passed' ? 'passed' : '<b>FAILED</b>') + '</td><td>' + (r.qa.reasons.length ? r.qa.reasons.map(esc).join('<br>') : '') + '</td></tr>';\n}).join('');\nconst html = '<p><b>' + esc(summary) + '</b></p>'\n  + '<p>Contact sheet: ' + (sheet.file ? '<code>' + esc(sheet.file) + '</code> in the run folder' : 'not made (' + esc(sheet.error) + ')') + '. Tick the versions to put in the package (the ones that passed are ticked), add notes for the ones you reject (one per line: <code>H2_6S_1X1: voice clipped</code>), then submit.</p>'\n  + '<table><thead><tr><th>Version</th><th>QA</th><th>Reasons</th></tr></thead><tbody>' + rows + '</tbody></table>';\nreturn [{ json: { summary, sheet, all, passed: passed.map((r) => r.version), default_checked: passed.map((r) => r.version).join(','), html,\n  form_url: $execution.resumeFormUrl, waiting_since: new Date().toISOString(),\n  results: R.results, not_made: R.not_made, llm_usd_12b: R.results.reduce((a, r) => a + (r.llm_usd || 0), 0) } }];\n"
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n// The summary line, the table for the form and the pre-ticked versions; the resume URL goes to run.json next.\nconst R = $('Sheet: body').first().json;\nconst sh = $input.first().json;\nconst S = $('Run: state for 12b').first().json;\nconst esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst sheet = httpOk(sh) && sh.body.file ? { file: sh.body.file } : { file: null, error: httpFail(sh) };\nconst byId = Object.fromEntries(R.results.map((r) => [r.version, r]));\nconst notMadeById = Object.fromEntries(R.not_made.map((n) => [n.version, n]));\nconst HOOKS = ['H1', 'H2'], LENGTHS = [6, 15, 30], FORMATS = ['9X16', '1X1', '16X9'];\nconst all = [];\nfor (const h of HOOKS) for (const l of LENGTHS) for (const f of FORMATS) all.push(h + '_' + l + 'S_' + f);\nconst passed = R.results.filter((r) => r.status === 'passed');\nconst failed = R.results.filter((r) => r.status === 'failed');\nconst first = (r) => r.version + ': ' + clip(r.qa.reasons[0], 90);\nlet summary = all.length + ' versions: ' + passed.length + ' passed, ' + failed.length + ' failed';\nif (failed.length) summary += ' (' + failed.slice(0, 5).map(first).join('; ') + (failed.length > 5 ? '; …' : '') + ')';\nif (R.not_made.length) summary += ', ' + R.not_made.length + ' not made';\nconst rows = all.map((v) => {\n  const r = byId[v];\n  if (!r) return '<tr><td>' + esc(v) + '</td><td>not made</td><td>' + esc(notMadeById[v] ? notMadeById[v].reason : '') + '</td></tr>';\n  return '<tr><td>' + esc(v) + '</td><td>' + (r.status === 'passed' ? 'passed' : '<b>FAILED</b>') + '</td><td>' + (r.qa.reasons.length ? r.qa.reasons.map(esc).join('<br>') : '') + '</td></tr>';\n}).join('');\n// the sheet is served by the \"Sheet link\" webhook of this workflow; the random token in the URL is what protects it\nconst sheet_url = sheet.file ? $execution.resumeFormUrl.match(/^https?:\\/\\/[^\\/]+/)[0] + '/webhook/ad-versions-sheet?run=' + encodeURIComponent(S.run_id) + '&token=' + R.sheet_token : null;\nconst html = '<p><b>' + esc(summary) + '</b></p>'\n  + (sheet_url ? '<p><a href=\"' + sheet_url + '\" target=\"_blank\">Contact sheet, full size</a> (green PASS, red FAIL)</p><p><img src=\"' + sheet_url + '\" width=\"900\" alt=\"contact sheet\"></p>'\n    : '<p>Contact sheet: not made (' + esc(sheet.error) + ')</p>')\n  + '<p>Tick the versions to put in the package (the ones that passed are ticked). To reject a version, leave it unticked and say why in the notes box, one note per line: <code>H2_6S_1X1: voice clipped</code>. '\n  + '<b>A version that failed QA can still go in:</b> tick it and write <code>VERSION: why</code> in the notes box; without that note it is rejected. Other lines in the box are a general note.</p>'\n  + '<table><thead><tr><th>Version</th><th>QA</th><th>Reasons</th></tr></thead><tbody>' + rows + '</tbody></table>';\nreturn [{ json: { summary, sheet, sheet_url, sheet_token: R.sheet_token, all, passed: passed.map((r) => r.version), default_checked: passed.map((r) => r.version).join(','), html,\n  form_url: $execution.resumeFormUrl, waiting_since: new Date().toISOString(),\n  results: R.results, not_made: R.not_made, llm_usd_12b: R.results.reduce((a, r) => a + (r.llm_usd || 0), 0) } }];\n"
    }
   },
   {
@@ -1631,11 +1727,11 @@
    "typeVersion": 2,
    "position": [
     690,
-    2750
+    2950
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// run.json now holds the QA results and the approval form's URL (the controller opens it).\nconst { saved_at, ...S } = $('Run data: build run.json').first().json;\nconst A = $input.first().json;\nconst data = { ...S, qa: A.results, not_made: A.not_made, summary: A.summary, sheet: A.sheet.file,\n  llm_usd: S.llm_usd + A.llm_usd_12b,\n  approval: { status: 'waiting', form_url: A.form_url, waiting_since: A.waiting_since, wait_limit: '7 days' }, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { form_url: A.form_url }, binary: { data: bin } }];\n"
+    "jsCode": "// run.json now holds the QA results and the approval form's URL (the controller opens it).\nconst { saved_at, ...S } = $('Run data: build run.json').first().json;\nconst A = $input.first().json;\nconst data = { ...S, qa: A.results, not_made: A.not_made, summary: A.summary, sheet: A.sheet.file,\n  llm_usd: S.llm_usd + A.llm_usd_12b,\n  sheet_token: A.sheet_token, sheet_url: A.sheet_url,\n  approval: { status: 'waiting', form_url: A.form_url, waiting_since: A.waiting_since, wait_limit: '7 days' }, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { form_url: A.form_url }, binary: { data: bin } }];\n"
    }
   },
   {
@@ -1645,7 +1741,7 @@
    "typeVersion": 1.1,
    "position": [
     920,
-    2750
+    2950
    ],
    "parameters": {
     "operation": "write",
@@ -1661,7 +1757,7 @@
    "typeVersion": 1.1,
    "position": [
     1150,
-    2750
+    2950
    ],
    "webhookId": "8a1c4f0e-6b1d-4f6e-9a55-12b0a7d1c001",
    "parameters": {
@@ -1756,11 +1852,11 @@
    "typeVersion": 2,
    "position": [
     1380,
-    2750
+    2950
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// What the reviewer ticked and wrote. A tick on a version that was never rendered is ignored (and noted).\nconst r = $input.first().json;\nconst A = $('Approval: build').first().json;\nconst sel = r['Approve versions'];\nconst ticked = (Array.isArray(sel) ? sel : (sel ? [sel] : [])).map((x) => String(x).trim());\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst notes = {}; const general = [];\nfor (const line of String(r['Review notes'] || '').split(/\\r?\\n/)) {\n  const t = line.trim(); if (!t) continue;\n  const m = t.match(/^(H\\d_\\d+S_[A-Z0-9]+)\\s*[:\\-–]\\s*(.+)$/);\n  if (m) notes[m[1]] = (notes[m[1]] ? notes[m[1]] + ' ' : '') + m[2]; else general.push(t);\n}\nconst approved = [], rejected = [], ignored = [];\nfor (const v of A.all) {\n  const res = byId[v];\n  const made = res && res.file;\n  if (ticked.includes(v) && made) { approved.push(v); continue; }\n  if (ticked.includes(v) && !made) ignored.push(v);\n  const nm = A.not_made.find((n) => n.version === v);\n  const why = nm ? 'not made: ' + nm.reason : (!res ? 'not made' : res.status === 'failed' ? 'failed QA: ' + res.qa.reasons.join('; ') : 'not approved by the reviewer');\n  rejected.push({ version: v, note: notes[v] ? notes[v] + ' (' + why + ')' : why });\n}\nreturn [{ json: { approved, rejected, ignored, general_note: general.join(' '), submitted_at: r.submittedAt || new Date().toISOString() } }];\n"
+    "jsCode": "// What the reviewer ticked and wrote. No submission time = the wait ran out (expired): nothing is packaged.\nconst r = $input.first().json;\nconst A = $('Approval: build').first().json;\nif (!r.submittedAt) return [{ json: { expired: true, approved: [], rejected: [], ignored: [], refused: [], approved_notes: {}, general_note: '', submitted_at: null } }];\nconst sel = r['Approve versions'];\nconst ticked = (Array.isArray(sel) ? sel : (sel ? [sel] : [])).map((x) => String(x).trim());\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst notes = {}; const general = [];\nfor (const line of String(r['Review notes'] || '').split(/\\r?\\n/)) {\n  const t = line.trim(); if (!t) continue;\n  const m = t.match(/^(H\\d_\\d+S_[A-Z0-9]+)\\s*[:\\-–]\\s*(.+)$/);\n  if (m) notes[m[1]] = (notes[m[1]] ? notes[m[1]] + ' ' : '') + m[2]; else general.push(t);\n}\nconst approved = [], rejected = [], ignored = [], refused = [], approved_notes = {};\nfor (const v of A.all) {\n  const res = byId[v];\n  const made = res && res.file;\n  if (ticked.includes(v) && made) {\n    if (res.status === 'failed' && !notes[v]) {        // approving over a QA failure needs a reason on record\n      refused.push(v);\n      rejected.push({ version: v, note: 'override needs a note: failed QA (' + res.qa.reasons.join('; ') + '); tick it again and write \"' + v + ': why\" in the notes box' });\n      continue;\n    }\n    approved.push(v); approved_notes[v] = notes[v] || ''; continue;\n  }\n  if (ticked.includes(v) && !made) ignored.push(v);\n  const nm = A.not_made.find((n) => n.version === v);\n  const why = nm ? 'not made: ' + nm.reason : (!res ? 'not made' : res.status === 'failed' ? 'failed QA: ' + res.qa.reasons.join('; ') : 'not approved by the reviewer');\n  rejected.push({ version: v, note: notes[v] ? notes[v] + ' (' + why + ')' : why });\n}\nreturn [{ json: { expired: false, approved, rejected, ignored, refused, approved_notes, general_note: general.join(' '), submitted_at: r.submittedAt } }];\n"
    }
   },
   {
@@ -1769,12 +1865,12 @@
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    1610,
-    2750
+    1730,
+    3000
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// POST /package body per docs/api.md. Dry run: no upload (the media service has no R2 environment yet), no GPU, no voice cost.\nconst P = $input.first().json;\nconst A = $('Approval: build').first().json;\nconst S = $('Run: state for 12b').first().json;\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst hookOf = (id) => (S.hooks || []).find((h) => h.id === id);\nconst approved = P.approved.map((v) => {\n  const r = byId[v];\n  const hook = hookOf(r.hook);\n  return { version: v, file: r.file, hook_text: (hook && hook.lines && hook.lines['6']) || r.line, script: r.line, length_s: r.length_s, fmt: r.fmt,\n    synthetic_media: true, qa: r.qa, v: 1, approver: 'reviewer', approved_at: P.submitted_at };\n});\nconst campaign = String(S.brief.product || '').trim().slice(0, 60) || 'Campaign';\nconst run = {\n  brand: String(S.rulebook.brand || S.brief.brand).slice(0, 40), campaign,\n  started_at: $('Brief form').first().json.submittedAt, finished_at: new Date().toISOString(),\n  disclaimer: S.disclaimer,\n  gpu_minutes: 0, gpu_rate_usd_h: 0, voice_usd: 0,        // dry run; live costs come with the live b-roll and voice\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n};\nconst upload = S.dry_run ? false : true;                 // a live run needs the media service's R2 environment, or /package says so\nreturn [{ json: { ...P, any: approved.length > 0, body: { run_id: S.run_id, run, approved, rejected: P.rejected, upload } } }];\n"
+    "jsCode": "// POST /package body per docs/api.md. Costs: GPU and voice are not costed yet (0); upload only for a live b-roll run (R2 env needed).\nconst P = $input.first().json;\nif (P.expired) return [{ json: { ...P, any: false } }];\nconst A = $('Approval: build').first().json;\nconst S = $('Run: state for 12b').first().json;\nconst byId = Object.fromEntries(A.results.map((x) => [x.version, x]));\nconst hookOf = (id) => (S.hooks || []).find((h) => h.id === id);\nconst approved = P.approved.map((v) => {\n  const r = byId[v];\n  const hook = hookOf(r.hook);\n  return { version: v, file: r.file, hook_text: (hook && hook.lines && hook.lines['6']) || r.line, script: r.line, length_s: r.length_s, fmt: r.fmt,\n    synthetic_media: true, qa: r.qa, note: P.approved_notes[v] || '', v: 1, approver: 'reviewer', approved_at: P.submitted_at };\n});\nconst campaign = String(S.brief.product || '').trim().slice(0, 60) || 'Campaign';\nconst mode = (S.voice_mode === 'real' ? 'real' : 'stand-in') + ' voice, ' + (S.broll_mode === 'live' ? 'live' : 'stand-in') + ' b-roll; GPU and voice not costed yet';\nconst run = {\n  brand: String(S.rulebook.brand || S.brief.brand).slice(0, 40), campaign,\n  started_at: $('Brief form').first().json.submittedAt, review_ready_at: A.waiting_since, finished_at: new Date().toISOString(),\n  disclaimer: S.disclaimer, mode,\n  gpu_minutes: 0, gpu_rate_usd_h: 0, voice_usd: 0,\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n};\nif (P.general_note) run.review_note = P.general_note;\nif (S.brief.landing_url) run.link = S.brief.landing_url;\nif (S.brief.cta) run.cta = S.brief.cta;\nconst upload = S.broll_mode === 'live';                  // a stand-in run has no R2 environment to upload to; a live one needs it, or /package says so\nreturn [{ json: { ...P, any: approved.length > 0, body: { run_id: S.run_id, run, approved, rejected: P.rejected, upload } } }];\n"
    }
   },
   {
@@ -1783,8 +1879,8 @@
    "type": "n8n-nodes-base.if",
    "typeVersion": 2.2,
    "position": [
-    1840,
-    2750
+    1960,
+    3000
    ],
    "parameters": {
     "conditions": {
@@ -1817,8 +1913,8 @@
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
-    2070,
-    2650
+    2190,
+    2900
    ],
    "parameters": {
     "method": "POST",
@@ -1846,26 +1942,26 @@
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    2300,
-    2650
+    2420,
+    2900
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\nconst B = $('Package: body').first().json;\nconst r = $input.first().json;\nconst ok = httpOk(r) && r.body.folder;\nreturn [{ json: { ...B, package: ok ? { ok: true, folder: r.body.folder, files: r.body.files, report: r.body.report, link: r.body.link || null }\n  : { ok: false, error: httpFail(r) } } }];\n"
+    "jsCode": "const clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\nconst B = $('Package: body').first().json;\nconst r = $input.first().json;\nconst ok = httpOk(r) && r.body.folder;\nreturn [{ json: { ...B, package_status: ok ? 'built' : 'failed',\n  package: ok ? { ok: true, folder: r.body.folder, files: r.body.files, report: r.body.report, link: r.body.link || null } : { ok: false, error: httpFail(r) } } }];\n"
    }
   },
   {
    "id": "00000108-0000-4000-8000-000000000000",
-   "name": "Package: nothing approved",
+   "name": "Package: nothing approved or expired",
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    2070,
-    2870
+    2190,
+    3100
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\nconst B = $input.first().json;\nreturn [{ json: { ...B, package: { ok: false, error: 'nothing was approved: no package' } } }];\n"
+    "jsCode": "const B = $input.first().json;\nconst status = B.expired ? 'expired' : 'nothing_approved';\nreturn [{ json: { ...B, package_status: status, package: { ok: false, error: B.expired ? 'the approval form was not submitted in 7 days: expired, nothing packaged' : 'nothing was approved: no package' } } }];\n"
    }
   },
   {
@@ -1874,12 +1970,12 @@
    "type": "n8n-nodes-base.code",
    "typeVersion": 2,
    "position": [
-    2530,
-    2750
+    2650,
+    3000
    ],
    "parameters": {
     "mode": "runOnceForAllItems",
-    "jsCode": "const MODEL = 'google/gemini-4-argon';\nconst llmText = (r) => { const c = r && r.choices && r.choices[0] && r.choices[0].message ? r.choices[0].message.content : ''; return Array.isArray(c) ? c.map((p) => (p && p.text) || '').join('') : String(c == null ? '' : c); };\nconst parseJson = (s) => JSON.parse(String(s).trim().replace(/^```(?:json)?\\s*/i, '').replace(/\\s*```\\s*$/, ''));\nconst cost = (r) => Number((r && r.usage && r.usage.cost) || 0);\nconst clip = (s, n) => { s = String(s == null ? '' : s); return s.length > n ? s.slice(0, n - 1) + '…' : s; };\n// What went wrong in an HTTP answer (full response with neverError, or a node error item)\nconst httpFail = (r) => {\n  if (r.error) return clip(typeof r.error === 'string' ? r.error : (r.error.message || JSON.stringify(r.error)), 300);\n  const b = r.body;\n  if (b && typeof b === 'object') {\n    if (typeof b.error === 'string') return clip(b.error, 300);\n    if (typeof b.detail === 'string') return clip(b.detail, 300);\n    if (Array.isArray(b.detail)) return clip(b.detail.map((d) => (d.loc ? d.loc.join('.') + ': ' : '') + (d.msg || '')).join('; '), 300);\n  }\n  return 'HTTP ' + r.statusCode;\n};\nconst httpOk = (r) => !r.error && r.statusCode >= 200 && r.statusCode < 300 && r.body && typeof r.body === 'object';\n\n// run.json for good: the package folder and the report numbers, who approved what.\nconst { saved_at, ...S } = $('Run data: build run.json').first().json;\nconst A = $('Approval: build').first().json;\nconst B = $input.first().json;\nconst data = { ...S, qa: A.results, not_made: A.not_made, summary: A.summary, sheet: A.sheet.file,\n  llm_usd: B.body.run.llm_usd,\n  approval: { status: 'done', form_url: A.form_url, submitted_at: B.submitted_at, approved: B.approved, rejected: B.rejected, ignored: B.ignored, note: B.general_note },\n  package: B.package, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { run_id: S.run_id, summary: A.summary, package: B.package, approved: B.approved.length, rejected: B.rejected.length }, binary: { data: bin } }];\n"
+    "jsCode": "// run.json for good: the package folder and the report numbers, who approved what (or that the approval expired).\nconst { saved_at, ...S } = $('Run data: build run.json').first().json;\nconst A = $('Approval: build').first().json;\nconst B = $input.first().json;\nconst data = { ...S, qa: A.results, not_made: A.not_made, summary: A.summary, sheet: A.sheet.file,\n  sheet_token: A.sheet_token, sheet_url: A.sheet_url,\n  llm_usd: Math.round((S.llm_usd + A.llm_usd_12b) * 1e6) / 1e6,\n  approval: { status: B.expired ? 'expired' : 'done', form_url: A.form_url, submitted_at: B.submitted_at, approved: B.approved, approved_notes: B.approved_notes,\n    rejected: B.rejected, ignored: B.ignored, override_refused: B.refused, note: B.general_note },\n  package_status: B.package_status, package: B.package, saved_at: new Date().toISOString() };\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'run.json', 'application/json');\nreturn [{ json: { run_id: S.run_id, summary: A.summary, package_status: B.package_status, package: B.package, approved: B.approved.length, rejected: B.rejected.length }, binary: { data: bin } }];\n"
    }
   },
   {
@@ -1888,8 +1984,8 @@
    "type": "n8n-nodes-base.readWriteFile",
    "typeVersion": 1.1,
    "position": [
-    2760,
-    2750
+    2880,
+    3000
    ],
    "parameters": {
     "operation": "write",
@@ -1900,23 +1996,70 @@
   },
   {
    "id": "00000111-0000-4000-8000-000000000000",
+   "name": "Run: package failed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    3110,
+    3000
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.package_status === 'failed' }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000112-0000-4000-8000-000000000000",
    "name": "Run: done",
    "type": "n8n-nodes-base.noOp",
    "typeVersion": 1,
    "position": [
-    2990,
-    2750
+    3340,
+    3100
    ],
    "parameters": {}
   },
   {
-   "id": "00000112-0000-4000-8000-000000000000",
+   "id": "00000113-0000-4000-8000-000000000000",
+   "name": "Run: stop with the package error",
+   "type": "n8n-nodes-base.stopAndError",
+   "typeVersion": 1,
+   "position": [
+    3340,
+    2900
+   ],
+   "parameters": {
+    "errorMessage": "={{ 'Package failed: ' + $json.package.error }}"
+   }
+  },
+  {
+   "id": "00000114-0000-4000-8000-000000000000",
    "name": "Approval: Telegram sheet (disabled)",
    "type": "n8n-nodes-base.telegram",
    "typeVersion": 1.2,
    "position": [
-    1150,
-    3030
+    460,
+    3150
    ],
    "disabled": true,
    "parameters": {
@@ -1935,13 +2078,13 @@
    }
   },
   {
-   "id": "00000113-0000-4000-8000-000000000000",
+   "id": "00000115-0000-4000-8000-000000000000",
    "name": "Approval: Telegram send and wait (disabled)",
    "type": "n8n-nodes-base.telegram",
    "typeVersion": 1.2,
    "position": [
-    1380,
-    3030
+    690,
+    3150
    ],
    "disabled": true,
    "parameters": {
@@ -1973,51 +2116,159 @@
    }
   },
   {
-   "id": "00000114-0000-4000-8000-000000000000",
-   "name": "Note 114",
-   "type": "n8n-nodes-base.stickyNote",
-   "typeVersion": 1,
-   "position": [
-    -20,
-    1830
-   ],
-   "parameters": {
-    "content": "## 4 Render and QA\nOne version at a time (the media service renders one at a time): `/render` (voice stub in a dry run), then `/check`, `/transcribe` against the script, `/frames` of the last frame and the vision model reading the end card's disclaimer back. QA reasons are merged as docs/api.md says. A render error makes that version `failed`; the loop goes on.",
-    "width": 2300,
-    "height": 130,
-    "color": 5
-   }
-  },
-  {
-   "id": "00000115-0000-4000-8000-000000000000",
-   "name": "Note 115",
-   "type": "n8n-nodes-base.stickyNote",
-   "typeVersion": 1,
-   "position": [
-    -20,
-    2610
-   ],
-   "parameters": {
-    "content": "## 5 Contact sheet and approval\n`/sheet`, then a Wait node resumed by a form (no Telegram bot yet): summary line, every version with its QA, passed ones pre-ticked, notes per version. The form's URL is in run.json (`approval.form_url`). Wait limit 7 days.\nThe two disabled Telegram nodes below are the replacement once the `telegram-demo` credential exists: swap them in for the form (Send and Wait with Approve passed / Review; Review opens the form).",
-    "width": 1500,
-    "height": 130,
-    "color": 6
-   }
-  },
-  {
    "id": "00000116-0000-4000-8000-000000000000",
-   "name": "Note 116",
-   "type": "n8n-nodes-base.stickyNote",
-   "typeVersion": 1,
+   "name": "Sheet link: webhook",
+   "type": "n8n-nodes-base.webhook",
+   "typeVersion": 2,
    "position": [
-    1590,
-    2610
+    0,
+    3660
+   ],
+   "webhookId": "ad-versions-sheet",
+   "parameters": {
+    "httpMethod": "GET",
+    "path": "ad-versions-sheet",
+    "responseMode": "responseNode",
+    "options": {}
+   }
+  },
+  {
+   "id": "00000117-0000-4000-8000-000000000000",
+   "name": "Sheet link: check",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    230,
+    3660
    ],
    "parameters": {
-    "content": "## 6 Package\n`/package` with the approved and rejected versions and the run's costs; the answer (folder, report numbers) goes into run.json. Dry run: no upload (the media service has no R2 environment yet) and no GPU or voice cost.",
-    "width": 1900,
-    "height": 130,
-    "color": 4
+    "mode": "runOnceForAllItems",
+    "jsCode": "// The public sheet link: ?run=<digits>&token=<32 hex>. Anything else never reaches the file system.\nconst q = $input.first().json.query || {};\nconst run = String(q.run || ''), token = String(q.token || '');\nconst ok = /^[0-9]{1,12}$/.test(run) && /^[0-9a-f]{32}$/.test(token);\nreturn [{ json: { ok, run, token, path: ok ? '/data/runs/' + run + '/run.json' : '/data/none' } }];\n"
+   }
+  },
+  {
+   "id": "00000118-0000-4000-8000-000000000000",
+   "name": "Sheet link: read run.json",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    460,
+    3660
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "={{ $json.path }}",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   },
+   "onError": "continueRegularOutput"
+  },
+  {
+   "id": "00000119-0000-4000-8000-000000000000",
+   "name": "Sheet link: token matches?",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    690,
+    3660
+   ],
+   "parameters": {
+    "mode": "runOnceForEachItem",
+    "jsCode": "// Compare the token with the one in run.json (the whole string, no early exit); the sheet itself is always runs/<run>/sheet.jpg.\nconst c = $('Sheet link: check').first().json;\nlet ok = false;\nif (c.ok) {\n  try {\n    const buf = await this.helpers.getBinaryDataBuffer($itemIndex, 'data');\n    const want = String(JSON.parse(buf.toString('utf8')).sheet_token || '');\n    let diff = want.length === c.token.length && want.length === 32 ? 0 : 1;\n    for (let i = 0; i < 32; i++) diff |= (want.charCodeAt(i) || 0) ^ (c.token.charCodeAt(i) || 0);\n    ok = diff === 0;\n  } catch (e) { ok = false; }\n}\nreturn { json: { ok, path: ok ? '/data/runs/' + c.run + '/sheet.jpg' : '/data/none' } };\n"
+   }
+  },
+  {
+   "id": "00000120-0000-4000-8000-000000000000",
+   "name": "Sheet link: allowed?",
+   "type": "n8n-nodes-base.if",
+   "typeVersion": 2.2,
+   "position": [
+    920,
+    3660
+   ],
+   "parameters": {
+    "conditions": {
+     "options": {
+      "caseSensitive": true,
+      "leftValue": "",
+      "typeValidation": "loose",
+      "version": 2
+     },
+     "conditions": [
+      {
+       "id": "c1",
+       "leftValue": "={{ $json.ok }}",
+       "rightValue": "",
+       "operator": {
+        "type": "boolean",
+        "operation": "true",
+        "singleValue": true
+       }
+      }
+     ],
+     "combinator": "and"
+    },
+    "options": {}
+   }
+  },
+  {
+   "id": "00000121-0000-4000-8000-000000000000",
+   "name": "Sheet link: read sheet.jpg",
+   "type": "n8n-nodes-base.readWriteFile",
+   "typeVersion": 1.1,
+   "position": [
+    1150,
+    3600
+   ],
+   "parameters": {
+    "operation": "read",
+    "fileSelector": "={{ $json.path }}",
+    "options": {
+     "dataPropertyName": "data"
+    }
+   }
+  },
+  {
+   "id": "00000122-0000-4000-8000-000000000000",
+   "name": "Sheet link: respond with the image",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    1380,
+    3600
+   ],
+   "parameters": {
+    "respondWith": "binary",
+    "inputDataFieldName": "data",
+    "options": {
+     "responseCode": 200,
+     "responseHeaders": {
+      "entries": [
+       {
+        "name": "Cache-Control",
+        "value": "private, max-age=300"
+       }
+      ]
+     }
+    }
+   }
+  },
+  {
+   "id": "00000123-0000-4000-8000-000000000000",
+   "name": "Sheet link: respond 404",
+   "type": "n8n-nodes-base.respondToWebhook",
+   "typeVersion": 1.1,
+   "position": [
+    1150,
+    3740
+   ],
+   "parameters": {
+    "respondWith": "text",
+    "responseBody": "not found",
+    "options": {
+     "responseCode": 404
+    }
    }
   }
  ],
@@ -2967,7 +3218,7 @@
     ],
     [
      {
-      "node": "Package: nothing approved",
+      "node": "Package: nothing approved or expired",
       "type": "main",
       "index": 0
      }
@@ -2996,7 +3247,7 @@
     ]
    ]
   },
-  "Package: nothing approved": {
+  "Package: nothing approved or expired": {
    "main": [
     [
      {
@@ -3022,7 +3273,98 @@
    "main": [
     [
      {
+      "node": "Run: package failed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Run: package failed?": {
+   "main": [
+    [
+     {
+      "node": "Run: stop with the package error",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
       "node": "Run: done",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sheet link: webhook": {
+   "main": [
+    [
+     {
+      "node": "Sheet link: check",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sheet link: check": {
+   "main": [
+    [
+     {
+      "node": "Sheet link: read run.json",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sheet link: read run.json": {
+   "main": [
+    [
+     {
+      "node": "Sheet link: token matches?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sheet link: token matches?": {
+   "main": [
+    [
+     {
+      "node": "Sheet link: allowed?",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sheet link: allowed?": {
+   "main": [
+    [
+     {
+      "node": "Sheet link: read sheet.jpg",
+      "type": "main",
+      "index": 0
+     }
+    ],
+    [
+     {
+      "node": "Sheet link: respond 404",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Sheet link: read sheet.jpg": {
+   "main": [
+    [
+     {
+      "node": "Sheet link: respond with the image",
       "type": "main",
       "index": 0
      }

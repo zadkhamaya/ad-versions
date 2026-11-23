@@ -15,7 +15,9 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
 
 1. **Brief form** (Form Trigger, Basic Auth). Fields, in order: Brand, Product, Audience, Offer, Key message 1/2/3,
    Required disclaimer (pre-filled with the rulebook's), Source clip (`.mp4`/`.mov`), Source clip link (https, for a
-   file over 90 MB; used instead of the upload when both are given), Beats, Look (optional), Dry run.
+   file over 90 MB; used instead of the upload when both are given), Beats, Look (optional), Landing URL
+   (optional, https; goes to `Link` in manifest.csv), Call to action (default `Learn More`, our guess at Meta's button text),
+   **Voice** and **B-roll** (stand-in or real, below).
 2. **Run: ids and brief** → **Run: folder** (`POST /run`, because n8n's file nodes write only into an existing folder) →
    **Rulebook: get** → **Disclaimer: must match the rulebook**: the form's disclaimer must equal the rulebook's (case,
    spacing and punctuation ignored), else the run stops at once with "the brief's disclaimer differs from the approved one
@@ -41,10 +43,10 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    and S5 → the files are read and sent to the vision model with the spec's prompt → `POST /lint` on the line → one
    retry naming the hit words → the rulebook's `look_fallback`. The line (and where it came from: `brief`, `vision`
    or `fallback`) is kept in the run data.
-7. **B-roll**, **dry run** branch: copies the six stand-in clips (`A|B|C` × `1344x768|768x1344`) from
+7. **B-roll**, stand-in branch: copies the six stand-in clips (`A|B|C` × `1344x768|768x1344`) from
    `/data/brand/fixtures/broll/` to `runs/<id>/broll/<hook><A|B|C>_<size>.mp4`: 12 files for two hooks, fewer when the
    compliance pass dropped a shot. The **live** branch (toolkit pods and `/api/broll`) is a disabled stub node plus a
-   Stop and Error: the toolkit side is not deployed yet, so a run with Dry run unticked stops there on purpose.
+   Stop and Error: the toolkit side is not deployed yet, so a run with B-roll set to Live stops there on purpose.
 8. **Run data**: `runs/<id>/run.json` holds the whole run so far (brief, beats, reframe, rulebook, scripts, compliance,
    look, b-roll, LLM cost). **Run: state for 12b** hands that same object (no binary) to the second half (below);
    **Run: summary** is a short side view for reading an execution.
@@ -57,18 +59,26 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    renders one at a time, so the loop is what keeps each request inside its timeout).
 10. **Render: POST /render** (timeout 20 min): `source`, `beats`, the hook's `slots` as `broll` (left out for 6 s, which has
     no cutaway), `vo_text` = the line, the rulebook's disclaimer and brand, `music` = `brand/music.m4a`, and
-    `voice` = `"stub"` in a dry run, `"runpod"` otherwise. An error answer (4xx, 5xx, a timeout) makes that version
-    **failed** with the service's message; the loop goes on.
-11. **QA** per rendered version: `POST /check`; `POST /transcribe` with the line as `script` (WER, banned words);
+    `voice` = `"stub"` or `"runpod"` from the form's Voice choice. An error answer (4xx, 5xx, a timeout) makes that version
+    **failed** with the service's message; the loop goes on. A request that times out leaves the service still rendering that
+    version, and the next request queues behind it: the 20 minutes and the loop's batch of 1, as built, are the safe pair
+    (do not raise the batch).
+11. **QA** per rendered version: `POST /check`; `POST /transcribe` with the line as `script` (WER, banned words)
+    and the brief's brand name as `hotwords` (never the script: the check must stay independent);
     `POST /frames` `at: "last"` → the vision model reads the end card's disclaimer back → compared with the
     rulebook's text ignoring case, spacing and punctuation. **QA: merge** builds `{passed, reasons}` as docs/api.md
     "How `qa` is merged": the render log's reasons, `/check`, `/transcribe`, and the disclaimer read. A QA call that fails
-    to run counts as a reason (a version that could not be checked does not pass).
-12. **Sheet** (`POST /sheet`, all rendered files in matrix order → `runs/<id>/sheet.jpg`) and **Approval: build**: the
-    summary line (`18 versions: 17 passed, 1 failed (H2_6S_1X1: loudness ...)`) and a table of every version with its QA.
+    to run counts as a reason (a version that could not be checked does not pass), and a failed check with no reason of
+    its own gets one ("... failed with no reason given").
+12. **Sheet** (`POST /sheet`, all rendered files in matrix order → `runs/<id>/sheet.jpg`, a green PASS or red FAIL on every
+    cell) and **Approval: build**: the summary line (`18 versions: 17 passed, 1 failed (H2_6S_1X1: loudness ...)`), the sheet
+    (shown in the form through the sheet link below) and a table of every version with its QA.
 13. **Approval: form** is a Wait node resumed by a form (no Telegram bot yet; the form-waiting path is public by design,
     its URL carries a signature). One checkbox per version, the ones that passed pre-ticked, and a notes box (one note
-    per line, `H2_6S_1X1: voice clipped`; other lines are a general note). Wait limit 7 days. The form's URL is in
+    per line, `H2_6S_1X1: voice clipped`; other lines are a general note, which goes to report.md). **A version that failed QA
+    can be approved only with a note** (`VERSION: why`): ticked without one it is rejected with "override needs a note". An
+    approved version's note goes to `/package` and report.md ("approved over QA: reasons — note"). Wait limit 7 days; when
+    it runs out the form returns no submission and the run is recorded as `expired`, nothing packaged. The form's URL is in
     `run.json` → `approval.form_url` (written before the wait), and a reviewer, or a script, posts it as multipart:
     `field-0` repeated per ticked version, `field-1` the notes. A tick on a version that was never rendered is ignored.
     The form lists all 18 versions as static options because n8n validates the Wait node's field list when the workflow
@@ -77,13 +87,27 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
     `script`, `length_s`, `fmt`, `synthetic_media`, `qa`, approver `reviewer`, approval time = the form's submission time),
     rejected items with the reviewer's note and why (QA reasons, not made), and `run` = brand (the rulebook's),
     campaign (the brief's product), `started_at` (the brief's submission), `finished_at` (now), GPU 0, voice 0 and
-    `llm_usd` = the first half's plus this half's vision calls. `upload` is false in a dry run: the media service has no R2
-    environment yet. A live run sends `true`, and `/package` then fails clearly if R2 is not configured. Nothing approved
-    = no package. The answer (folder, files, report numbers) is written to `run.json` → `package`, then **Run: done**.
+    `llm_usd` = the first half's plus this half's vision calls, `mode` (what was stand-in), `review_ready_at` (when the form
+    was published: report.md gives "machine time to review-ready" and the total, in Asia/Jakarta time), the landing URL and
+    CTA (`link`, `cta`) and the reviewer's general note. `upload` is false with stand-in b-roll: the media service has no R2
+    environment yet; live b-roll sends `true`, and `/package` then fails clearly if R2 is not configured. Nothing approved
+    or an expired form = no package (a normal end). The answer (folder, files, report numbers) is written to `run.json` →
+    `package`; a **failed** package (a 4xx or 5xx from `/package`) ends the run in error after run.json is written, so the
+    error workflow fires; otherwise **Run: done**.
+
+### The contact-sheet link
+
+The sheet is shown in the approval form through a second trigger in the same workflow:
+`GET /webhook/ad-versions-sheet?run=<id>&token=<32 hex>`. The `/webhook` path is public through the tunnel by design; the token is
+the protection: 128 random bits made in **Render: plan** (`crypto.randomBytes`, so the container needs
+`NODE_FUNCTION_ALLOW_BUILTIN=crypto`) and stored in `run.json` (`sheet_token`, `sheet_url`). A wrong or missing token, a run
+that does not exist or a malformed id answers 404, and the only file ever served is `runs/<id>/sheet.jpg`.
 
 Two **disabled** Telegram nodes (a photo with the summary, then Send and Wait with *Approve passed* / *Review*) sit
 unconnected under the approval step. They replace the form once the `telegram-demo` credential and a chat id exist:
-connect the sheet to the photo, the photo to Send and Wait, and send *Review* on to the form.
+connect the sheet to the photo, the photo to Send and Wait, and send *Review* on to the form. Two fixes wait for
+that: sendPhoto needs the sheet as binary (read the file, send that), and `$env.TELEGRAM_DEMO_CHAT_ID` is refused when n8n
+blocks env access in nodes (use a credential field or a Set node).
 
 ### The dry-run voice and the music placeholder
 
@@ -97,7 +121,7 @@ logo is needed: the end card draws the brand name.
 
 ### What the run state holds (what 12b receives)
 
-`run_id`, `dry_run`, `source` (`runs/<id>/source.mp4`), `beats` (the service's shape), `reframe` (`beats`, `sheet`,
+`run_id`, `dry_run` (stand-in b-roll), `voice_mode`, `broll_mode`, `source` (`runs/<id>/source.mp4`), `beats` (the service's shape), `reframe` (`beats`, `sheet`,
 `flags`), `rulebook`, `disclaimer` (the rulebook's), `brief`, `hooks` (`id`, `lines` by length, `broll` = 3 shot texts,
 `null` where dropped), `compliance` (`items`, `notes`), `look` (`line`, `source`), `broll` (`mode`, `clips`, `files`),
 `llm_usd`, and **`slots`**: per hook, `/render`'s `broll` argument ready to send, with the shot letters mapped
@@ -125,11 +149,17 @@ The LLM nodes are HTTP Request nodes, not the OpenAI nodes: with a custom base U
 `response_format` (structured outputs) and image parts as the API defines them, and the cost the API reports
 (`usage.cost`) is summed into `llm_usd` in the run data.
 
-## Dry run
+## Stand-in or real: Voice and B-roll
 
-The form's **Dry run** checkbox is ticked by default. Ticked (or the field missing from a post) = stand-in b-roll, no
-GPU, no spend. Unticked (`[]`) = the live branch, which for now stops with an error. A dry run also uses the stub voice and builds the
-package without uploading it.
+Two separate dropdowns on the form, both defaulting to the stand-in (a post that leaves them out is a stand-in run).
+- **Voice**: *Stand-in (free, flite)* sends `voice: "stub"` to `/render`; *Real (RunPod)* sends `"runpod"`. Without the RunPod
+  and R2 environment in the media service every version fails with the service's message (for example `missing environment:
+  VOICE_SAMPLE_KEY, ...`); the run records those as failed versions, and when none can be rendered it ends with that reason in
+  `error.json`.
+- **B-roll**: *Stand-in clips (no GPU)* copies the fixture clips; *Live (pods)* is the disabled stub that stops the run with a
+  clear message until the toolkit side exists. The package is uploaded to R2 only for live b-roll.
+- The old single "Dry run" checkbox is still understood when a script posts it (`[]` = live b-roll and real voice).
+- GPU and voice costs are not wired yet (0 in `/package`); report.md says so in its Mode line.
 
 ## Beats syntax
 
@@ -162,7 +192,8 @@ S6 27.5-31.5 close 0.7 x1=0.42
   `N8N_PAYLOAD_SIZE_MAX=100` and `N8N_FORMDATA_FILE_SIZE_MAX=100`.
 - Execution history is pruned: `EXECUTIONS_DATA_PRUNE=true`, `EXECUTIONS_DATA_MAX_AGE=336` (hours, 14 days). A run keeps
   the brief and three base64 frames in its execution data.
-- The media service must have `POST /run` (see `docs/api.md`).
+- The n8n container also needs `NODE_FUNCTION_ALLOW_BUILTIN=crypto` (the sheet link's token).
+- The media service must have `POST /run` and `/render`'s `voice` (see `docs/api.md`).
 - The dry-run clips live in the data folder: `n8n/fixtures/make-broll.sh` makes them (`n8n/fixtures/broll/` ships in
   the repo, six files of about 85 KB); copy that folder to `/data/brand/fixtures/broll/` once.
 
@@ -182,14 +213,16 @@ and the transcript check are deterministic, so a brief cannot talk its way past 
 
 ## Posting the form from a script
 
-Fields are `field-0` to `field-12` in the order above (Brand is 0, Offer 3, the file 8, the link 9, Beats 10, Look 11,
-Dry run 12). Checkbox values are a JSON array:
+Fields are `field-0` to `field-15` in the order above (Brand is 0, Offer 3, the file 8, the link 9, Beats 10, Look 11,
+Landing URL 12, Call to action 13, Voice 14, B-roll 15). Dropdowns take the option text:
 
 ```
 curl -u brief:$PASSWORD http://127.0.0.1:5678/form/brief \
   --form-string field-0=BRAND ... -F "field-8=@clip.mp4;type=video/mp4" \
-  --form-string "field-10=$BEATS" --form-string 'field-12=["Dry run: stand-in b-roll, no GPU"]'
+  --form-string "field-10=$BEATS" --form-string 'field-14=Stand-in (free, flite)' --form-string 'field-15=Stand-in clips (no GPU)'
 ```
+
+The approval form is posted the same way (multipart): `field-0` once per ticked version, `field-1` the notes.
 
 ## Not built yet
 
