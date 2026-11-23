@@ -22,7 +22,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from media import captions, endcard, ffmpeg, match, naming, package, qa, rulebook, sheet, timeline, voice, whisper
+from media import captions, endcard, ffmpeg, match, naming, package, qa, reframe, rulebook, sheet, timeline, voice, whisper
 from media.safe import scrub_paths
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -39,6 +39,7 @@ def max_renders() -> int:
 
 RENDER_SLOTS = threading.BoundedSemaphore(max_renders())
 _vo_locks, _vo_guard = {}, threading.Lock()
+_reframe_lock = threading.Lock()   # runs/<id>/reframe.json is read, extended and rewritten under this
 _pkg_locks = {}                    # run_id -> Lock: one /package build at a time per run (a second one is a 409)
 SLOTS = ("slot1", "slot2", "slot3")
 LENGTHS = (6, 15, 30)
@@ -401,12 +402,62 @@ def _voice(req: RenderIn, run_dir: Path, work: Path, log: dict) -> Path:
     return cached
 
 
+def _reframe_key(source: Path, beat, fmt: str) -> str:
+    """A suggestion is good for one source file (its path, size and mtime), one beat (name and span) and one format."""
+    st = source.stat()
+    return "|".join([rel(source), str(st.st_size), str(st.st_mtime_ns), beat.name, f"{beat.start:.3f}", f"{beat.end:.3f}", fmt])
+
+
+def _suggestions(source: Path, run_dir: Path, beat, fmts) -> dict:
+    """{fmt: suggestion} of a beat: from runs/<id>/reframe.json where the same source, beat and format was read before, else one pass
+    over the frames for the rest (and into the cache). A cache that cannot be read is ignored."""
+    path = run_dir / "reframe.json"
+    with _reframe_lock:
+        try:
+            cache = json.loads(path.read_text())
+            cache = cache if isinstance(cache, dict) else {}
+        except (OSError, ValueError):
+            cache = {}
+        keys = {f: _reframe_key(source, beat, f) for f in fmts}
+        todo = [f for f in fmts if keys[f] not in cache]
+        if todo:
+            cache.update({keys[f]: v for f, v in reframe.suggest_formats(str(source), beat.start, beat.end, todo).items()})
+            run_dir.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_name(f"reframe.{threading.get_ident()}.tmp")
+            tmp.write_text(json.dumps(cache, indent=1, sort_keys=True))
+            os.replace(tmp, path)
+        return {f: cache[keys[f]] for f in fmts}
+
+
+def _resolve_auto(segs, beats, source: Path, run_dir: Path, fmt: str, log: dict):
+    """Each source segment whose face is "auto" gets reframe.suggest's x for its beat and this format; logged under "reframe",
+    with a render-log reason when the action splits. A window as wide as the frame has nothing to place: centre, no suggestion."""
+    out = []
+    for s in segs:
+        if s.kind != "src" or s.face != "auto":
+            out.append(s)
+            continue
+        w, h = ffmpeg._size(str(source))
+        if ffmpeg.crop_box(w, h, fmt)[0] >= w:
+            out.append(dataclasses.replace(s, face="centre"))
+            continue
+        sug = _suggestions(source, run_dir, beats[s.beat], [fmt])[fmt]
+        log.setdefault("reframe", {}).setdefault(s.beat, {})[fmt] = sug
+        if sug["split"]:
+            reason = f"crop split action in {s.beat} ({fmt})"
+            if reason not in log["reasons"]:
+                log["reasons"].append(reason)
+        out.append(dataclasses.replace(s, face=sug["x"]))
+    return out
+
+
 def _render(req: RenderIn, prepared, run_dir: Path, work: Path, out_path: Path, log: dict) -> None:
     fmt, inputs, edit, segs = prepared
     _, _, music, logo = inputs
     source = inputs[0]
     threads = _env_int("X264_THREADS", 2)
     endcard_s = float(edit["endcard_s"])
+    segs = _resolve_auto(segs, {b.name: b for b in req.beats}, source, run_dir, fmt, log)
     log["segments"] = [{"kind": s.kind, "slot": s.slot, "start": round(s.start, 3), "dur": round(s.dur, 4)} for s in segs]
     log["broll_match"] = {}
     segs, refs, max_diff = _grade(segs, str(source), edit, log)

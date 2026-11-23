@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import threading
@@ -1023,3 +1024,73 @@ def test_face_numbers_must_be_a_fraction(env):
     for bad in ({"9X16": 1.2}, {"9X16": -1}, {"4X5": 0.5}, {"16X9": 0.5}, {"9X16": "left"}, 0.5):
         b = body(); b["beats"][0]["x"] = bad
         assert c.post("/render", json=b).status_code == 422, bad
+
+
+# ---- Task 6c: face "auto" ----
+
+def _auto_render(env, monkeypatch, clip, version, mutate=lambda b: None, beat_face="auto"):
+    """Render with a stub picture; returns (response json, faces of the source segments as the picture saw them)."""
+    _stub_pipeline(env, monkeypatch)
+    stub, seen = ffmpeg.render_picture, {}
+    monkeypatch.setattr(ffmpeg, "render_picture", lambda segs, fmt, *a, **k: seen.update(segs=segs) or stub(segs, fmt, *a, **k))
+    if env.get("clip") != clip:                   # copied once: a new copy is a new mtime, which is a new cache key
+        shutil.copy(env["reframe_long"] / clip, env["run"] / "clip.mp4")
+        env["clip"] = clip
+    b = body(version, source="runs/r1/clip.mp4")
+    b["beats"][0]["face"] = beat_face
+    mutate(b)
+    r = env["client"].post("/render", json=b)
+    assert r.status_code == 200, r.text
+    return r.json(), [s.face for s in seen["segs"] if s.kind == "src"]
+
+
+@pytest.fixture
+def auto(env, reframe_long):
+    env["reframe_long"] = reframe_long
+    return env
+
+
+def test_auto_follows_the_action_logs_it_and_caches_it(auto, monkeypatch):
+    from media import reframe
+    calls = []
+    real = reframe.analyse
+    monkeypatch.setattr(reframe, "analyse", lambda *a, **k: calls.append(a) or real(*a, **k))
+    j, faces = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
+    assert isinstance(faces[0], float) and faces[0] < 0.35
+    s = j["log"]["reframe"]["S1"]["9X16"]
+    assert s["x"] == faces[0] and not s["split"] and set(s) == {"x", "coverage", "faces", "split", "span"}
+    assert j["log"]["reasons"] == [] and len(calls) == 1
+    cache = json.loads((auto["run"] / "reframe.json").read_text())
+    assert len(cache) == 1 and "S1" in next(iter(cache)) and "9X16" in next(iter(cache))
+    j2, faces2 = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")        # the same beat and format: from the cache
+    assert faces2 == faces and j2["log"]["reframe"] == j["log"]["reframe"] and len(calls) == 1
+    _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_1X1")                       # another format of the same beat: one more read
+    assert len(calls) == 2 and len(json.loads((auto["run"] / "reframe.json").read_text())) == 2
+
+
+def test_auto_split_adds_the_reason(auto, monkeypatch):
+    j, faces = _auto_render(auto, monkeypatch, "split.mp4", "H1_6S_9X16")
+    assert j["log"]["reframe"]["S1"]["9X16"]["split"] is True
+    assert j["log"]["reasons"] == ["crop split action in S1 (9X16)"]
+
+
+def test_auto_changes_with_the_beat_or_the_source(auto, monkeypatch):
+    a, fa = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
+    b, fb = _auto_render(auto, monkeypatch, "split.mp4", "H1_6S_9X16")              # same name, same clip path: the cache is by source file
+    assert b["log"]["reframe"]["S1"]["9X16"]["split"] is True and fa != fb
+
+
+def test_auto_is_skipped_where_a_number_decides_or_nothing_can_move(auto, monkeypatch):
+    _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")                        # something in the cache already
+    j, faces = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16", lambda b: b["beats"][0].update(x={"9X16": 0.7}))
+    assert faces == [0.7] and "reframe" not in j["log"]
+    j, faces = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_16X9")             # a 16:9 source into 16:9: nothing to crop
+    assert "reframe" not in j["log"] and not any("16X9" in k for k in json.loads((auto["run"] / "reframe.json").read_text()))
+    j, faces = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16", beat_face=0.3)
+    assert faces == [0.3] and "reframe" not in j["log"]
+
+
+def test_a_corrupt_reframe_cache_is_ignored(auto, monkeypatch):
+    (auto["run"] / "reframe.json").write_text("{not json")
+    j, faces = _auto_render(auto, monkeypatch, "left.mp4", "H1_6S_9X16")
+    assert faces[0] < 0.35 and json.loads((auto["run"] / "reframe.json").read_text())

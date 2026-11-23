@@ -55,3 +55,19 @@ def reframe_clips(tmp_path_factory):
        f"[0][1]{left}[a];[a][2]{right},{grain}", *enc, str(d / "split.mp4"))
     ff("-f", "lavfi", "-i", grey, "-vf", grain, *enc, str(d / "still.mp4"))
     return d
+
+
+@pytest.fixture(scope="session")
+def reframe_long(tmp_path_factory):
+    """The `left` and `split` clips of reframe_clips at 32 s, long enough for the demo beats (640x360, with silent-free video only)."""
+    d = tmp_path_factory.mktemp("reframe_long")
+    grey = "color=c=0x808080:s=640x360:r=24:d=32"
+    sq = "color=c=white:s=40x40:r=24:d=32"
+    grain = "noise=alls=30:allf=t:all_seed=3"
+    enc = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"]
+    left = "overlay=x='90+70*sin(2*PI*t)':y='160+40*sin(3*PI*t)'"
+    right = "overlay=x='550+70*sin(2*PI*t)':y='160+40*cos(3*PI*t)'"
+    ff("-f", "lavfi", "-i", grey, "-f", "lavfi", "-i", sq, "-filter_complex", f"[0][1]{left},{grain}", *enc, str(d / "left.mp4"))
+    ff("-f", "lavfi", "-i", grey, "-f", "lavfi", "-i", sq, "-f", "lavfi", "-i", sq, "-filter_complex",
+       f"[0][1]{left}[a];[a][2]{right},{grain}", *enc, str(d / "split.mp4"))
+    return d
