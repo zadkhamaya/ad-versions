@@ -37,3 +37,21 @@ def beats():
             ("S3", 10.2, 14.8, "routine", "left"), ("S4", 15.2, 19.8, "opener-H2", "centre"),
             ("S5", 20.2, 25.8, "calm", "right"), ("S6", 26.2, 31.8, "close", "centre")]
     return {r[0]: Beat(*r) for r in rows}
+
+
+@pytest.fixture(scope="session")
+def reframe_clips(tmp_path_factory):
+    """Synthetic 16:9 clips (640x360, 3 s) over film grain: one bright square moving inside the left third, two squares (far left and
+    far right), and a still shot (grain only)."""
+    d = tmp_path_factory.mktemp("reframe")
+    grey = "color=c=0x808080:s=640x360:r=24:d=3"
+    sq = "color=c=white:s=40x40:r=24:d=3"
+    grain = "noise=alls=30:allf=t:all_seed=3"       # a fixed seed: the same grain every run
+    enc = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "18", "-pix_fmt", "yuv420p"]
+    left = "overlay=x='90+70*sin(2*PI*t)':y='160+40*sin(3*PI*t)'"
+    right = "overlay=x='550+70*sin(2*PI*t)':y='160+40*cos(3*PI*t)'"
+    ff("-f", "lavfi", "-i", grey, "-f", "lavfi", "-i", sq, "-filter_complex", f"[0][1]{left},{grain}", *enc, str(d / "left.mp4"))
+    ff("-f", "lavfi", "-i", grey, "-f", "lavfi", "-i", sq, "-f", "lavfi", "-i", sq, "-filter_complex",
+       f"[0][1]{left}[a];[a][2]{right},{grain}", *enc, str(d / "split.mp4"))
+    ff("-f", "lavfi", "-i", grey, "-vf", grain, *enc, str(d / "still.mp4"))
+    return d
