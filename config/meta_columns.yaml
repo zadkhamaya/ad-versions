@@ -1,0 +1,28 @@
+# Meta Ads Manager bulk-import columns for a video ad (manifest.csv header, in this order).
+#
+# SECONDARY SOURCE, UNVERIFIED. Meta's own help pages could not be read (JS-only). The names below are from
+# https://adsuploader.com/blog/facebook-ads-bulk-uploads ("Updated September 30, 2026"), read 2026-11-22. That page
+# itself warns that Meta renames headers.
+# TODO(owner): download Ads Manager -> Export & import -> template and replace this list.
+#
+# Meaning, per that page: Body = primary text, Title = headline, Link = website URL; Video File Name must match
+# a video uploaded together with the import.
+#
+# `source` says where the value comes from (the CSV writer in media/package.py reads this, so a column can be fixed
+# here without code):
+#   run.<key>   a key of the run dict (campaign, objective, link, cta, ...)
+#   item.<key>  a key of the approved item (hook_text, script, ...)
+#   ad_set      "<CAMPAIGN>_<FORMAT>", one ad set per placement group, e.g. SLEEPLAUNCH_9X16
+#   ad_name     the version file name without .mp4
+#   file        the renamed file, e.g. BRAND_SLEEPLAUNCH_H1_15S_9X16_EN_V01.mp4
+# `default` is used when the source is missing or empty.
+columns:
+  - {name: "Campaign Name", source: run.campaign}
+  - {name: "Campaign Objective", source: run.objective, default: "Outcome Awareness"}  # default: our guess, not Meta's (unverified)
+  - {name: "Ad Set Name", source: ad_set}
+  - {name: "Ad Name", source: ad_name}
+  - {name: "Title", source: item.hook_text}
+  - {name: "Body", source: item.script}
+  - {name: "Link", source: run.link}
+  - {name: "Call to Action", source: run.cta, default: "Learn More"}  # default: our guess, not Meta's (unverified)
+  - {name: "Video File Name", source: file}

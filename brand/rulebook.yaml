@@ -1,0 +1,29 @@
+# The fictional brand's rules (spec §5). Read by the media service and pasted into the n8n script prompts.
+brand: BRAND   # placeholder until the name is chosen (Task 11)
+disclaimer: "A clinician assesses every request. Care plans differ from person to person."
+look_fallback: "night interior, one warm practical lamp against cool blue window light, low key, muted teal and amber, 35mm, shallow depth of field, fine film grain"
+claims:
+  - "Talk to a sleep clinician from home"
+  - "A plan built around your routine"
+  - "Ongoing check-ins with your care team"
+shots:
+  - "a dim bedroom at night, curtains moving slightly, no people"
+  - "a phone face up on a bedside table showing a calm app screen, no people"
+  - "soft morning light through linen curtains, no people"
+  - "slow abstract ink clouds in deep blue water"
+  - "a cup of tea steaming on a windowsill at dusk, no people"
+banned_words: [cure, cures, treat insomnia, guaranteed, guarantee, clinically proven, doctor recommended,
+               before and after, miracle, instant results, 100%, risk-free, sleeping pill, sleeping pills,
+               melatonin, medication, medicine, prescription, script, request treatment, get your prescription,
+               discount, limited time, free consult,
+               treat, treats, treatment, before/after, price, prices, $, today only, hurry, act now, last chance]
+banned_media:
+  - "pills, packets, bottles, injection pens, pharmacy bags or prescription paper"
+  - "white coats or stethoscopes used as endorsement"
+  - "a phone screen showing a treatment order or a request-treatment button"
+  - "a person speaking to camera, quoted, named, or shown as a reviewer, patient testimonial or clinician endorsement"
+  - "a person shown distressed then fixed, or before and after"
+  - "visuals implying a medical result (a glowing after shot, pills working, charts improving)"
+  - "people in b-roll (b-roll is people-free)"
+  - "on-screen text in generated shots"
+tone: "calm, warm, plain; the viewer is capable, never ashamed or frightened; no superlatives; inclusive casting; an ordinary home"

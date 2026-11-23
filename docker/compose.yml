@@ -1,0 +1,21 @@
+services:
+  n8n:
+    image: n8nio/n8n:${N8N_TAG}   # set in docker/.env: the exact tag chosen in Step 2
+    restart: unless-stopped
+    ports: ["127.0.0.1:5678:5678"]
+    env_file: ${HOME}/.ad-versions/n8n.env
+    volumes: ["${HOME}/.ad-versions/n8n:/home/node/.n8n", "${HOME}/.ad-versions/data:/data"]
+    mem_limit: 1g
+  media:
+    build: {context: .., dockerfile: docker/media.Dockerfile}
+    restart: unless-stopped
+    env_file: ${HOME}/.ad-versions/media.env
+    volumes: ["${HOME}/.ad-versions/data:/data"]
+    mem_limit: 1536m
+    # the container's CMD runs uvicorn with `--workers 1`, and it must stay 1: the render semaphore (MAX_RENDERS) lives in the process
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=5).status == 200 else 1)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s

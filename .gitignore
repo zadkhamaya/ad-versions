@@ -1,0 +1,15 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.superpowers/
+# media: the source clip and renders never enter the repo
+*.mp4
+*.mov
+*.m4a
+*.wav
+!n8n/fixtures/broll/*.mp4
+!brand/music.m4a
+out/
+docker/.env.local
+docs/overnight-report.md

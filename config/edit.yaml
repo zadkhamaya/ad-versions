@@ -1,0 +1,12 @@
+# The edit per hook and length (spec §5a): source beats S1-S6 and b-roll slots, in order. H2 opens on S4.
+endcard_s: 1.5
+cutaway_s: 3.0
+broll_match: {grain: 6, sharpen: 0.5, max_diff: 12}   # grain/sharpen tuned on the real clip (Task 13)
+H1:
+  6:  [S1]
+  15: [S1, S2, slot1, S4, S5]
+  30: [S1, S2, slot1, S3, S4, slot2, S5, S6, slot3]
+H2:
+  6:  [S4]
+  15: [S4, S3, slot1, S5, S6]
+  30: [S4, S1, S2, slot1, S3, slot2, S5, S6, slot3]

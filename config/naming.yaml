@@ -1,0 +1,13 @@
+# The version naming convention (spec §3). Documentation for a team; media/naming.py is the code.
+pattern: "<BRAND>_<CAMPAIGN>_<HOOK>_<LENGTH>_<FORMAT>_<LANG>_V<NN>.mp4"
+example: "BRAND_SLEEPLAUNCH_H1_15S_9X16_EN_V01.mp4"
+charset: "A-Z 0-9 and _ only; every other character is dropped from a part, a part left empty is refused"
+values:
+  HOOK: [H1, H2]
+  LENGTH: [6S, 15S, 30S]
+  FORMAT:
+    9X16: 1080x1920   # Reels / Stories
+    1X1: 1080x1080    # Feed
+    16X9: 1920x1080   # in-stream
+  LANG: [EN]
+  NN: "01-99; rises when the same name is rendered again"
