@@ -51,3 +51,30 @@ def test_the_render_body_passes_the_brand_logo():
     wf = json.loads((ROOT / "n8n" / "workflow.json").read_text())
     plan = next(n for n in wf["nodes"] if n["name"] == "Render: plan")
     assert "music: 'brand/music.m4a', logo: 'brand/logo.png'" in plan["parameters"]["jsCode"]
+
+
+def _wf_code(name):
+    import json
+    wf = json.loads((ROOT / "n8n" / "workflow.json").read_text())
+    return next(n for n in wf["nodes"] if n["name"] == name)["parameters"]["jsCode"]
+
+
+def test_the_lint_calls_say_which_texts_are_spoken_lines():
+    assert "voice: items.map((i) => i.kind === 'line')" in _wf_code("Compliance: collect")
+    assert "voice: rewritten.map(() => true)" in _wf_code("Compliance: apply 1")      # a rewrite is always a spoken line
+    assert 'A hit named "brackets"' in _wf_code("Compliance: judge prompt")
+
+
+def test_the_script_word_budget_matches_the_measured_voice_rate():
+    """docs/measured.md: ~2.85 words/s; a line fills (length - end card - 0.5 s). The prompt's range and the 'too long' note agree."""
+    import re
+    prompt, check = _wf_code("Scripts: prompt"), _wf_code("Scripts: validate")
+    rate, end = 2.85, 1.5
+    rng = {m[0]: (int(m[1]), int(m[2])) for m in re.findall(r'\\"(\d+)\\"[^"]*?\((?:a \d+ second ad, )?(\d+) to (\d+) words\)', prompt.replace('"', '\\"'))}
+    assert set(rng) == {"6", "15", "30"}, rng
+    maxw = {k: int(v) for k, v in re.findall(r"'(\d+)': (\d+)", re.search(r"const MAXW = \{[^}]*\}", check).group(0))}
+    for length, (lo, hi) in rng.items():
+        fill = rate * (int(length) - end - 0.5)
+        assert lo <= fill <= hi + 1 and 0.85 * fill <= lo, (length, lo, hi, fill)         # the range brackets the fill target
+        assert maxw[length] == round(rate * (int(length) - end)) and hi <= maxw[length]       # the note fires only past the end card
+    assert "No brackets or parentheses" in prompt

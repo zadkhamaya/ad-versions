@@ -123,6 +123,14 @@ const FAKE_TOKEN = 'bot' + '123456789:' + 'A'.repeat(35);        // built at run
   const bug = await rec({ error: 'x.map is not a function' }, { error: 'x.map is not a function' });
   ok(bug.telegram === 'skipped: x.map is not a function', 'error.json: a text-step bug keeps its reason');
   ok(skipped.telegram === 'skipped: no chat id' && skipped.run_id === '77' && skipped.node === 'Render: POST /render', 'error.json: skipped, original fields kept');
+  // compliance: brackets are a hit on a voice line only (the /lint call says which texts are spoken)
+  const H = { id: 'H1', lines: { '6': 'Sleep (really) better.', '15': 'Sleep better.', '30': 'Sleep well.' }, broll: ['a (x) shot', 'b', 'c'] };
+  const col = (await run(wf, 'Compliance: collect', { input: { hooks: [H] } }))[0].json;
+  ok(JSON.stringify(col.body.voice) === JSON.stringify([true, true, true, false, false, false]) && col.body.texts.length === 6, 'lint 1 marks the three lines as spoken and the shots not');
+  const comp = col.comp_items.map((i, k) => ({ ...i, hits: k === 0 ? ['brackets'] : [] }));
+  const judge = { choices: [{ message: { content: JSON.stringify({ 'H1:6': { ok: false, rewrite: 'Sleep, really, better.' }, 'H1:15': { ok: true, rewrite: '' }, 'H1:30': { ok: true, rewrite: '' } }) } }] };
+  const a1 = (await run(wf, 'Compliance: apply 1', { nodes: { 'Compliance: judge prompt': { comp_items: comp, hooks: [H], llm_usd: 0 } }, input: judge }))[0].json;
+  ok(a1.comp_items[0].status === 'rewritten' && JSON.stringify(a1.body.voice) === '[true]' && a1.body.texts[0] === 'Sleep, really, better.', 'a bracket hit goes to the judge for one rewrite, which is linted as a spoken line');
   console.log(fails ? 'FAILED ' + fails : 'ALL PASS');
   process.exit(fails ? 1 : 0);
 })();

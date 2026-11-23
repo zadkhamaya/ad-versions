@@ -956,6 +956,32 @@ def test_rulebook_edit_and_lint_endpoints(env):
     assert c.post("/lint", json={}).status_code == 422
 
 
+BRACKETS = ["(", ")", "\uff08", "\uff09", "[", "]", "{", "}", "\u3010", "\u3011", "<", ">"]
+
+
+def test_lint_reports_brackets_in_a_voice_line_like_a_banned_word(env):
+    c = env["client"]
+    texts = ["Sleep (really) better", "This will cure you [now]", "A calm night"]
+    r = c.post("/lint", json={"texts": texts, "voice": [True, True, True]}).json()
+    assert r == {"hits": [["brackets"], ["brackets", "cure"], []]}
+    assert c.post("/lint", json={"texts": texts}).json() == {"hits": [[], ["cure"], []]}              # not a voice line: unchanged
+    assert c.post("/lint", json={"texts": texts, "voice": [False, True, False]}).json() == {"hits": [[], ["brackets", "cure"], []]}
+    assert c.post("/lint", json={"texts": texts, "voice": [True]}).status_code == 422               # one flag per text
+    for ch in BRACKETS:
+        assert c.post("/lint", json={"texts": [f"Sleep {ch} better"], "voice": [True]}).json() == {"hits": [["brackets"]]}, ch
+
+
+def test_render_refuses_a_voice_over_with_brackets(env, monkeypatch):
+    _stub_pipeline(env, monkeypatch)
+    c = env["client"]
+    for ch in BRACKETS:
+        r = c.post("/render", json=body("H1_6S_1X1", vo_text=f"Sleep {ch}really better.", voice="stub"))
+        assert r.status_code == 422 and "bracket" in r.text, ch
+    r = c.post("/render", json=body("H1_6S_1X1", vo_text="(softly) Sleep better."))
+    assert r.status_code == 422 and not env["speak"]                                                  # nothing was sent to the voice
+    assert c.post("/render", json=body("H1_6S_1X1", vo_text="Sleep better, really.")).status_code == 200
+
+
 def test_package_file_stem_must_equal_the_version(env):
     c = env["client"]
     b = pkg_body(env)
@@ -1302,6 +1328,7 @@ def test_transcribe_passes_hotwords_to_the_model_call_and_never_the_script(env, 
     c.post("/transcribe", json={"file": "runs/r1/source.mp4", "script": "Sleep better tonight."})
     assert got["hotwords"] is None                                  # the script is not a hint: the check must stay independent
     assert c.post("/transcribe", json={"file": "runs/r1/source.mp4", "hotwords": ""}).status_code == 422
+    assert c.post("/transcribe", json={"file": "runs/r1/source.mp4", "hotwords": "x" * 301}).status_code == 422
 
 
 def test_transcribe_counts_a_split_brand_as_one_word_only_with_hotwords(env, monkeypatch):
@@ -1310,7 +1337,6 @@ def test_transcribe_counts_a_split_brand_as_one_word_only_with_hotwords(env, mon
     j = {"file": "runs/r1/source.mp4", "script": "Restfield helps you sleep."}
     assert c.post("/transcribe", json={**j, "hotwords": "Restfield"}).json()["wer"] == 0.0
     assert c.post("/transcribe", json=j).json()["wer"] > 0.0
-    assert c.post("/transcribe", json={"file": "runs/r1/source.mp4", "hotwords": "x" * 301}).status_code == 422
 
 
 def test_sheet_takes_a_pass_or_fail_mark_per_file(env):

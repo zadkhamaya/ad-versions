@@ -132,17 +132,43 @@ def test_the_logo_is_a_trimmed_offwhite_wordmark_on_transparent():
     assert len(solid) > 1000 and (solid == [0xF3, 0xEE, 0xE6]).all()       # one flat warm off-white
 
 
+@needs_drawtext
 def test_the_logo_script_makes_the_same_logo(tmp_path):
     out = tmp_path / "again.png"
     subprocess.run(["bash", str(BRAND_DIR / "make-logo.sh"), str(out)], check=True, capture_output=True)
     assert endcard._size(str(out)) == endcard._size(str(BRAND_DIR / "logo.png"))
+    w, h = endcard._size(str(out))
+    a, b = _rgba(out, w, h)[..., 3].astype(int), _rgba(BRAND_DIR / "logo.png", w, h)[..., 3].astype(int)
+    assert np.abs(a - b).mean() < 1.0                       # the same letters (a different freetype may move an edge pixel)
     assert (BRAND_DIR / "fonts" / "OFL-Lora.txt").read_text().count("SIL OPEN FONT LICENSE") >= 1
+
+
+@needs_drawtext
+def test_the_logo_script_works_from_a_path_with_a_colon_and_a_space(tmp_path):
+    import shutil
+    odd = tmp_path / "a:b c" / "brand"
+    shutil.copytree(BRAND_DIR, odd)
+    out = tmp_path / "odd.png"
+    subprocess.run(["bash", str(odd / "make-logo.sh"), str(out)], check=True, capture_output=True)
+    assert endcard._size(str(out)) == endcard._size(str(BRAND_DIR / "logo.png"))
 
 
 @needs_drawtext
 @pytest.mark.parametrize("fmt", ["9X16", "16X9"])
 def test_the_end_card_with_the_brand_logo_fits(tmp_path, fmt):
     W, H = FORMATS[fmt]
+    logo = BRAND_DIR / "logo.png"
     out = tmp_path / "e.png"
-    info = endcard.make(fmt, DISCLAIMER, out, logo=BRAND_DIR / "logo.png", brand="Restfield")
-    assert info["logo"] is True and _bright(_png_pixels(out, W, H)).any()
+    info = endcard.make(fmt, DISCLAIMER, out, logo=logo, brand="Restfield")
+    lay = endcard.fit(fmt, DISCLAIMER, logo, "Restfield")
+    assert info["logo"] is True
+    px = _bright(_png_pixels(out, W, H))
+    ys, xs = np.where(px)
+    assert xs.min() >= 0.07 * W - 1 and xs.max() <= 0.93 * W + 1 and ys.min() >= 0.05 * H and ys.max() <= 0.95 * H     # the whole block is inside the frame
+    top, lw, lh = lay["top"], lay["logo_w"], lay["logo_h"]
+    band = px[top:top + lh]                                                  # the logo's own rows
+    bx = np.where(band.any(axis=0))[0]
+    assert band.any() and bx.min() >= (W - lw) // 2 - 2 and bx.max() <= (W + lw) // 2 + 2          # its letters sit inside its box
+    assert (bx.max() - bx.min()) > 0.9 * lw                                    # and fill the width of it, trimmed edge to edge
+    assert abs((bx.min() + bx.max()) / 2 - W / 2) <= 3                          # centred
+    assert px[top + lh:].any()                                                  # and the disclaimer is drawn below it

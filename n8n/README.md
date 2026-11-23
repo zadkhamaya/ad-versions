@@ -29,9 +29,11 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    sheet. **Reframe: keep** stores the suggestions, the sheet path (`runs/<id>/reframe.jpg`) and the review/split flags.
 4. **Scripts**: one LLM call with structured output (`json_schema`, strict): 2 hooks, a voice-over line
    for 6, 15 and 30 s, 3 b-roll shots per hook, each shot an enum of the rulebook's `shots` → **Scripts: validate**
-   (shape, shots in the rulebook, word budgets noted; a hook that picks the same shot twice gets the duplicate replaced
+   (shape, shots in the rulebook, word budgets noted; the prompt asks for 10 to 11, 32 to 37 and 70 to 80 words, the measured
+   rate of the VoxCPM2 voice, docs/measured.md; a hook that picks the same shot twice gets the duplicate replaced
    by an unused rulebook shot, noted in `script_notes`).
-5. **Compliance**: `POST /lint` on every line and shot (the hard word list) → a second LLM call judges each **line**
+5. **Compliance**: `POST /lint` on every line and shot (the hard word list; for a line, any bracket character is a hit too, `brackets`,
+   because the voice skips or speaks what is inside them) → a second LLM call judges each **line**
    against `banned_media`, the approved claims and the tone (no testimonial lines, no outcomes) and returns
    `{"<id>": {"ok", "rewrite"}}`. B-roll shots are pre-approved in the rulebook, so only the word list checks them →
    **apply 1** rewrites a failing line once (a shot with a word-list hit is dropped, not rewritten) →
@@ -152,8 +154,7 @@ well but not perfectly, so a short line with an unusual word can miss the 0.15 W
 a stand-in voice, not a workflow fault.
 
 There is no music bed yet. `n8n/fixtures/make-music.sh <out.m4a>` makes a quiet 35 s placeholder pad; put it at
-`brand/music.m4a` under the data root (on the box `~/.ad-versions/data/brand/music.m4a`) until the real bed exists. No
-logo is needed: the end card draws the brand name.
+`brand/music.m4a` under the data root (on the box `~/.ad-versions/data/brand/music.m4a`) until the real bed exists.
 
 **The brand is Restfield** (made up; `brand/rulebook.yaml`). Its wordmark, `brand/logo.png` (Lora, off-white on transparent, 1600 px wide,
 made by `brand/make-logo.sh` from the OFL font in `brand/fonts/`), goes to `brand/logo.png` under the data root too (on the box

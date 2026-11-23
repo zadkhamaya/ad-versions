@@ -30,17 +30,44 @@ class VoiceError(Exception):
     pass
 
 
-_LEAD_NOTE = re.compile(r"^\s*[(\uff08][^()\uff08\uff09\[\]\uff3b\uff3d]*[)\uff09]")
-_PAIR = re.compile(r"[(\uff08\[\uff3b]([^()\uff08\uff09\[\]\uff3b\uff3d]*)[)\uff09\]\uff3d]")
-_STRAY = re.compile(r"[()\uff08\uff09\[\]\uff3b\uff3d]")
+OPENERS, CLOSERS = "(\uff08[{\u3010<", ")\uff09]}\u3011>"
+BRACKET_CHARS = OPENERS + CLOSERS
+_ROUND_OPEN, _ROUND_CLOSE = "(\uff08", ")\uff09"
+_B = re.escape(BRACKET_CHARS)
+_PAIR = re.compile(f"[{re.escape(OPENERS)}]([^{_B}]*)[{re.escape(CLOSERS)}]")
+_STRAY = re.compile(f"[{_B}]")
+
+
+def has_brackets(text):
+    """True when `text` holds any bracket character: ( ) full-width ( ) [ ] { } \u3010 \u3011 < >. A script line may hold none
+    (/lint and /render say so): VoxCPM2 skips the words inside them or speaks them as an instruction."""
+    return bool(_STRAY.search(text))
+
+
+def _drop_leading_note(text):
+    """Drop a leading round or full-width bracket pair, nested pairs included, with its contents; text with no such note, or an
+    unclosed one, is returned as it is."""
+    t = text.lstrip()
+    if not t or t[0] not in _ROUND_OPEN:
+        return text
+    depth = 0
+    for i, ch in enumerate(t):
+        if ch in _ROUND_OPEN:
+            depth += 1
+        elif ch in _ROUND_CLOSE:
+            depth -= 1
+            if depth == 0:
+                return t[i + 1:]
+    return text
 
 
 def clean_text(text):
     """What VoxCPM2 may be given. It silently skips words inside brackets anywhere in a line and reads a leading "(...)" as a style
     note (cloning from a sample, it speaks the note aloud). So: a leading round or full-width pair goes, with its contents; any other
-    pair becomes commas around its words (they are read, with a pause); a stray bracket is removed; spaces are collapsed."""
+    pair becomes commas around its words (they are read, with a pause); a stray bracket is removed; spaces are collapsed.
+    Script lines are refused with brackets before they get here (has_brackets); this is the defence behind that."""
     while True:
-        t = _LEAD_NOTE.sub("", text, count=1)
+        t = _drop_leading_note(text)
         if t == text:
             break
         text = t
@@ -54,6 +81,7 @@ def clean_text(text):
     text = re.sub(r"\s+,", ",", text)
     text = re.sub(r",(?:\s*,)+", ",", text)                # commas that met
     text = re.sub(r",\s*([.!?;:])", r"\1", text)           # a comma never sits before the sentence's own punctuation
+    text = re.sub(r"([.!?;:])\s*,", r"\1", text)           # nor right after it
     return text.strip().lstrip(",").rstrip(",").strip()
 
 

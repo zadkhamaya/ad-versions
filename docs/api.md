@@ -54,9 +54,11 @@ round), nor a voice made by another model.
 is `model: "voxcpm2"` with exactly `{"seed": 42, "cfg_value": 1.6, "inference_timesteps": 10}`: the worker takes those three
 (seed int, cfg_value 1.0 to 3.0, inference_timesteps 1 to 50) and refuses an unknown param. The script is cleaned before the job,
 because VoxCPM2 silently skips words inside brackets anywhere in a line and reads a leading `(...)` as a style note (it speaks that
-note aloud when it clones from a sample): a leading round or full-width bracket pair is dropped with its contents; any other pair
-becomes commas around its words (`Sleep (really) better` is spoken `Sleep, really, better`); stray brackets are removed; spaces are
-collapsed. `vo_text` itself (the captions, the transcript check) is not changed. A script that is empty after this fails the version.
+note aloud when it clones from a sample). So **`vo_text` may not contain a bracket character** (`( ) （ ） [ ] { } 【 】 < >`): `/render`
+answers 422 with a message saying so, and `POST /lint` with `voice` flags it (below), so the workflow's rewrite-once-then-drop path
+handles an LLM line that has one. The cleaning stays as a defence behind that: a leading round or full-width pair is dropped with its
+contents (nested ones too), any other pair becomes commas around its words, stray brackets are removed, spaces are collapsed, and a
+script that is empty after this fails the version.
 `logo` is optional (a PNG; the brand name is drawn as text without it): the workflow passes `brand/logo.png`, the Restfield wordmark
 made by `brand/make-logo.sh`.
 
@@ -235,7 +237,9 @@ Answer: `{"folder": "runs/r1"}`. A `run_id` outside letters, digits, `-`, `_` (1
 - `GET /edit` returns `config/edit.yaml`: `endcard_s`, `cutaway_s`, `broll_match` and, per hook, the beats and b-roll slots of
   each length. JSON keys are strings, so the lengths come as `"6"`, `"15"`, `"30"`.
 - `POST /lint` checks texts against the banned words (whole words, a phrase matches across spaces, line breaks and hyphens):
-  `{"texts": ["This will cure you", "A calm night"]}` gives `{"hits": [["cure"], []]}`, one list per text.
+  `{"texts": ["This will cure you", "A calm night"]}` gives `{"hits": [["cure"], []]}`, one list per text. With `voice`, one boolean per
+  text (a different length is a 422), a text flagged `true` is a spoken line, and any bracket character in it, `( ) ( ) [ ] { } 【 】 < >`
+  (full-width too), adds the hit `brackets`: `{"texts": ["Sleep (really) better"], "voice": [true]}` gives `{"hits": [["brackets"]]}`.
 
 ## GET /health
 

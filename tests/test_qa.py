@@ -294,7 +294,7 @@ def test_sheet_status_must_match_the_files(tmp_path):
         sheet.make(["a.mp4", "b.mp4"], str(tmp_path / "s.jpg"), status=["pass"])
 
 
-# ---- hotwords: a split name counts as one word ----
+# ---- hotwords: a split one-word name in the transcript counts as one word ----
 
 def test_a_hotword_heard_as_two_words_is_one_word():
     assert qa.script_diff("Restfield helps", "rest field helps", hotwords="Restfield") == 0.0
@@ -313,6 +313,27 @@ def test_hotword_joining_does_not_hide_real_errors():
     assert qa.script_diff("Restfield helps", "rest helps", hotwords="Restfield") == 0.5
 
 
-def test_hotwords_are_a_comma_list_and_a_phrase_joins_too():
+@pytest.mark.parametrize("heard", ["restfield 500 helps", "rest 500 field helps", "500 restfield helps",
+                                   "restfield \u3054\u8996\u8074 helps", "rest 7 field helps"])
+def test_a_token_without_letters_is_never_swallowed_by_a_hotword(heard):
+    assert qa.script_diff("Restfield helps", heard, hotwords="Restfield") == qa.script_diff("Restfield helps", heard)
+    assert qa.script_diff("Restfield helps", heard, hotwords="Restfield") > 0
+
+
+def test_hotwords_are_a_comma_or_line_list():
     assert qa.script_diff("Restfield helps", "rest field helps", hotwords="Calmora, Restfield") == 0.0
     assert qa.script_diff("Try Restfield", "try rest field", hotwords="Calmora, Restfield\nOther") == 0.0
+
+
+def test_a_multi_word_hotword_changes_nothing():
+    script = "Call Online sleep clinic now"
+    assert qa.script_diff(script, "call online sleep clinics now", hotwords="Online sleep clinic, Restfield") == \
+        qa.script_diff(script, "call online sleep clinics now") == 0.2                           # one slip stays one slip
+    assert qa.script_diff(script, "call online sleep clinic now", hotwords="Online sleep clinic") == 0.0
+    assert qa.script_diff("Restfield helps", "rest field helps", hotwords="Rest field") > 0.3    # a two-word hotword is no joiner
+
+
+def test_the_script_is_never_changed_by_hotwords():
+    assert qa.script_diff("Rest field helps", "restfield helps", hotwords="Restfield") == \
+        qa.script_diff("Rest field helps", "restfield helps") > 0
+    assert qa.script_diff("rest field helps", "rest field helps", hotwords="Restfield") == 0.0

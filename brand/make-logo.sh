@@ -11,17 +11,28 @@ FONT="$here/fonts/Lora-Variable.ttf"
 COLOR="F3EEE6"
 WIDTH=1600
 tmp="$(mktemp -d)"; trap 'rm -rf "$tmp"' EXIT
+# drawtext's filter string has its own syntax (: , ' \\ [ ]): the font is used through a copy in the temp folder, and a temp folder
+# whose name would need escaping is refused, so a checkout path with a colon or a space cannot break the filter
+case "$tmp" in *[!A-Za-z0-9_./-]*) echo "make-logo.sh: temp folder name needs escaping, set TMPDIR to a plain path: $tmp" >&2; exit 1;; esac
+[ -f "$FONT" ] || { echo "make-logo.sh: font not found: $FONT" >&2; exit 1; }
+cp "$FONT" "$tmp/font.ttf"
 
 # 1. the letters in white on black, large and with room round them
 printf '%s' "$NAME" > "$tmp/name.txt"
 ffmpeg -v error -y -f lavfi -i "color=c=black:s=3600x900" \
-  -vf "drawtext=fontfile=$FONT:textfile=$tmp/name.txt:expansion=none:fontsize=480:fontcolor=white:x=150:y=150" \
+  -vf "drawtext=fontfile=$tmp/font.ttf:textfile=$tmp/name.txt:expansion=none:fontsize=480:fontcolor=white:x=150:y=150" \
   -frames:v 1 "$tmp/mask.png"
 
-# 2. the box round the letters
-box="$(ffmpeg -v error -i "$tmp/mask.png" -vf "bbox=min_val=24,metadata=print:file=-" -f null - \
-  | sed -n 's/^lavfi.bbox.\(x1\|y1\|x2\|y2\)=\(.*\)$/\1=\2/p' | tr '\n' ' ')"
-eval "$(echo "$box" | tr ' ' '\n' | sed '/^$/d')"
+# 2. the box round the letters (numbers read from ffmpeg's metadata lines, never evaluated)
+x1=""; y1=""; x2=""; y2=""
+while IFS== read -r k v; do
+  case "$k" in
+    lavfi.bbox.x1) x1="$v";; lavfi.bbox.y1) y1="$v";; lavfi.bbox.x2) x2="$v";; lavfi.bbox.y2) y2="$v";;
+  esac
+done < <(ffmpeg -v error -i "$tmp/mask.png" -vf "bbox=min_val=24,metadata=print:file=-" -f null -)
+for n in "$x1" "$y1" "$x2" "$y2"; do
+  case "$n" in ''|*[!0-9]*) echo "make-logo.sh: no letters found in the mask" >&2; exit 1;; esac
+done
 w=$((x2 - x1 + 1)); h=$((y2 - y1 + 1))
 
 # 3. trim, scale to WIDTH, and use the letters as the alpha of a flat colour

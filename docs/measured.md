@@ -55,3 +55,38 @@ encode would cut time and the generation loss below.
 
 Loaded and ran once on a 3 s synthetic tone: 4.9 s including the model load (the model was already cached). Real
 speech, and the time per 30 s voice-over, are not measured yet.
+
+## The voice's speaking rate and the script word budget (VoxCPM2, 2026-11-24)
+
+What ran: six real speak jobs through the live media container (`voice.speak`, the designed voice sample, VoxCPM2 with the fixed
+params), no renders. The lines were the six voice-over lines of an earlier dry run (brand name changed to Restfield), two hooks at
+6, 15 and 30 s. Length is the WAV's duration, which includes any leading or trailing silence.
+
+| Line | Words | Voice (s) | Words/s | GPU time |
+|---|---|---|---|---|
+| H1 6 s | 9 | 3.20 | 2.81 | 40.1 s (cold start) |
+| H1 15 s | 18 | 6.08 | 2.96 | 7.5 s |
+| H1 30 s | 37 | 12.48 | 2.97 | 12.3 s |
+| H2 6 s | 8 | 3.68 | 2.17 | 6.2 s |
+| H2 15 s | 21 | 7.04 | 2.98 | 8.8 s |
+| H2 30 s | 35 | 12.48 | 2.80 | 12.2 s |
+
+Together 128 words in 44.96 s: **2.85 words per second** (2.8 to 3.0 on the longer lines; the 6 s lines scatter more, 2.2 to 2.8,
+because a pause or a silent edge weighs more in 3 s). The voice speaks fast: the old budget (at most 9, 28 and 60 words) left the
+15 s ad with 6 s of voice.
+
+**Formula.** The edit ends the voice-over's slot where the end card begins (`endcard_s` = 1.5 s in `config/edit.yaml`); the voice
+should end half a second before that, so
+
+target words = rate x (length - endcard_s - 0.5 s), "too long" past rate x (length - endcard_s)
+
+| Length | Voice should fill | Target words | Prompt range | "May not fit" note past |
+|---|---|---|---|---|
+| 6 s | 4.0 s | 11.4 | 10 to 11 | 13 words (4.5 s) |
+| 15 s | 13.0 s | 37.1 | 32 to 37 | 38 words (13.5 s) |
+| 30 s | 28.0 s | 79.8 | 70 to 80 | 81 words (28.5 s) |
+
+The range's top is the target; its bottom is about 15 % under it (a line a little short only leaves a calm gap before the end
+card). Both are in the workflow (`Scripts: prompt`, `Scripts: validate`; `tests/test_repo_files.py` checks they agree with this
+formula). Not covered: other voice samples or seeds, other text (numbers, long words) and the rate with the real LLM lines; re-measure
+if the voice sample or model changes, and check the first real run's `vo_s` against these slots.

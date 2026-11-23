@@ -168,6 +168,14 @@ class RenderIn(BaseModel):
         naming.parse_version(v)           # ValueError -> 422 with the reason
         return v
 
+    @field_validator("vo_text")
+    @classmethod
+    def _no_brackets(cls, v):
+        if voice.has_brackets(v):
+            raise ValueError("vo_text may not contain brackets ( ) [ ] { } < > (also full-width): the voice skips or speaks what is "
+                             "inside them, and the captions and the transcript check would not match what is said")
+        return v
+
     @field_validator("broll")
     @classmethod
     def _slots(cls, v):
@@ -256,6 +264,13 @@ class TranscribeIn(BaseModel):
 
 class LintIn(BaseModel):
     texts: list[str] = Field(max_length=200)
+    voice: Optional[list[bool]] = None       # one flag per text: true = a spoken line, where any bracket is also a hit ("brackets")
+
+    @model_validator(mode="after")
+    def _one_flag_per_text(self):
+        if self.voice is not None and len(self.voice) != len(self.texts):
+            raise ValueError("voice needs one flag per text")
+        return self
 
 
 class SheetIn(BaseModel):
@@ -648,7 +663,9 @@ def get_edit():
 @app.post("/lint")
 def lint(req: LintIn):
     rb = _rulebook()
-    return {"hits": [rulebook.hard_hits(t, rb) for t in req.texts]}
+    flags = req.voice or [False] * len(req.texts)
+    return {"hits": [sorted(rulebook.hard_hits(t, rb) + (["brackets"] if v and voice.has_brackets(t) else []))
+                     for t, v in zip(req.texts, flags)]}
 
 
 @app.post("/sheet")

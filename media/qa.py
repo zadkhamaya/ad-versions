@@ -178,22 +178,29 @@ def _edit_matrix(ref, hyp):
     return d
 
 
-def _join_hotwords(tokens, hotwords):
-    """A run of tokens whose letters, joined, spell a hotword becomes that one word ("rest field" -> "restfield" for the brand
-    Restfield): a transcriber splits a made-up name. `hotwords` is a comma or line separated list; case and non-letters do not count."""
-    keys = {re.sub(r"[^a-z]", "", h.lower()) for h in re.split(r"[,\n]", hotwords or "")} - {""}
+def _join_hotwords(tokens, hotwords, script):
+    """In the transcript only: a run of two or more words that spells a one-word hotword becomes that word ("rest field" ->
+    "restfield" for the brand Restfield): a transcriber splits a made-up name. `hotwords` is a comma or line separated list; only
+    entries of one word count, case and punctuation do not. Every word of a run must be made of letters a-z, so a number or a
+    foreign-script word is never swallowed into the name. The script side is never changed, and a run that the script itself holds
+    word for word is left alone."""
+    ref = " " + " ".join(script) + " "
+    keys = set()
+    for h in re.split(r"[,\n]", hotwords or ""):
+        if len(h.split()) == 1 and re.fullmatch(r"[a-z]+", k := re.sub(r"[^a-z]", "", h.lower())):
+            keys.add(k)
     if not keys:
         return tokens
-    letters = [re.sub(r"[^a-z]", "", t) for t in tokens]
     out, i = [], 0
     while i < len(tokens):
-        for j in range(len(tokens), i, -1):                 # the longest run first
-            joined = "".join(letters[i:j])
-            if joined in keys and (j - i > 1 or tokens[i] != joined):
-                out.append(joined)
-                i = j
+        done = False
+        for j in range(len(tokens), i + 1, -1):             # the longest run first, at least two words
+            run = [re.sub(r"'", "", t) for t in tokens[i:j]]
+            if all(re.fullmatch(r"[a-z]+", t) for t in run) and "".join(run) in keys and " " + " ".join(tokens[i:j]) + " " not in ref:
+                out.append("".join(run))
+                i, done = j, True
                 break
-        else:
+        if not done:
             out.append(tokens[i])
             i += 1
     return out
@@ -201,10 +208,10 @@ def _join_hotwords(tokens, hotwords):
 
 def script_diff(script, transcript, hotwords=None):
     """Word error rate of `transcript` against `script` (Levenshtein over lowercased words without punctuation), 0..1. With
-    `hotwords`, a run of words that spells one of them counts as that one word, in both texts, before the rate is computed."""
+    `hotwords`, a run of transcript words that spells a one-word hotword counts as that one word (see _join_hotwords)."""
     ref, hyp = _words(script), _words(transcript)
     if hotwords:
-        ref, hyp = _join_hotwords(ref, hotwords), _join_hotwords(hyp, hotwords)
+        hyp = _join_hotwords(hyp, hotwords, ref)
     if not ref:
         return 0.0 if not hyp else 1.0
     return min(1.0, _edit_matrix(ref, hyp)[-1][-1] / len(ref))

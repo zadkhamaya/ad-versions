@@ -252,6 +252,12 @@ def test_speak_reports_the_execution_time(tmp_path):
     ("Sleep better [tonight] and \uff08soon\uff09.", "Sleep better, tonight, and, soon."),
     ("Sleep ) better ( tonight .", "Sleep better tonight ."),                          # stray brackets removed, spaces collapsed
     ("Sleep   better\n tonight.", "Sleep better tonight."),
+    ("((softly)) Sleep better.", "Sleep better."),                                         # a nested leading note goes whole
+    ("(softly) (slowly) Sleep better.", "Sleep better."),
+    ("Sleep better. (Really) now.", "Sleep better. Really, now."),                      # no comma after sentence punctuation
+    ("Line one.\n(softly) Line two.", "Line one. softly, Line two."),
+    ("Sleep {really} better <tonight> \u3010now\u3011.", "Sleep, really, better, tonight, now."),
+    ("Sleep ((really)) better.", "Sleep, really, better."),
     ("Sleep better tonight.", "Sleep better tonight."),
 ])
 def test_text_for_voxcpm2_handles_brackets(text, want):
@@ -275,3 +281,9 @@ def test_a_text_that_is_only_a_style_note_is_refused(tmp_path):
     with pytest.raises(VoiceError, match="empty"):
         speak("(softly)", tmp_path / "vo.wav", sample_get="x", transcript="t", run="r", version="V", runpod=rp, r2=FakeR2(), endpoint="ep1")
     assert rp.jobs == []
+
+
+def test_has_brackets_knows_every_bracket_character():
+    for ch in "()\uff08\uff09[]{}\u3010\u3011<>":
+        assert voice.has_brackets(f"Sleep {ch} better"), ch
+    assert not voice.has_brackets("Sleep better, tonight. 100% calm - really?")
