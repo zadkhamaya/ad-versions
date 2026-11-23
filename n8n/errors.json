@@ -14,11 +14,25 @@
   },
   {
    "id": "00000002-0000-4000-8000-000000000000",
+   "name": "Error: ids",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    230,
+    0
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "// A failure in a node has execution.id (= the run id). A failure in the trigger has none: then trigger-<timestamp>.\nconst e = $input.first().json;\nconst ex = e.execution || {};\nconst id = ex.id != null && /^[A-Za-z0-9_-]{1,64}$/.test(String(ex.id)) ? String(ex.id) : 'trigger-' + Date.now();\nreturn [{ json: { ...e, run_id: id, has_execution: ex.id != null } }];\n"
+   }
+  },
+  {
+   "id": "00000003-0000-4000-8000-000000000000",
    "name": "Error: run folder",
    "type": "n8n-nodes-base.httpRequest",
    "typeVersion": 4.2,
    "position": [
-    230,
+    460,
     0
    ],
    "parameters": {
@@ -30,30 +44,30 @@
     "sendBody": true,
     "contentType": "json",
     "specifyBody": "json",
-    "jsonBody": "={{ { run_id: String($json.execution.id) } }}"
-   }
-  },
-  {
-   "id": "00000003-0000-4000-8000-000000000000",
-   "name": "Error: build error.json",
-   "type": "n8n-nodes-base.code",
-   "typeVersion": 2,
-   "position": [
-    460,
-    0
-   ],
-   "parameters": {
-    "mode": "runOnceForAllItems",
-    "jsCode": "const e = $('Error trigger').first().json;\nconst ex = e.execution || {};\nconst data = {\n  run_id: String(ex.id), execution_id: String(ex.id), failed_at: new Date().toISOString(),\n  workflow: (e.workflow && e.workflow.name) || '', node: ex.lastNodeExecuted || '',\n  message: String((ex.error && ex.error.message) || 'unknown error').slice(0, 1000),\n};\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'error.json', 'application/json');\nreturn [{ json: data, binary: { data: bin } }];\n"
+    "jsonBody": "={{ { run_id: $json.run_id } }}"
    }
   },
   {
    "id": "00000004-0000-4000-8000-000000000000",
+   "name": "Error: build error.json",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    690,
+    0
+   ],
+   "parameters": {
+    "mode": "runOnceForAllItems",
+    "jsCode": "const e = $('Error: ids').first().json;\nconst ex = e.execution || {};\nconst tr = e.trigger || {};\nconst err = ex.error || tr.error || {};\nconst data = {\n  run_id: e.run_id, execution_id: ex.id != null ? String(ex.id) : null, failed_at: new Date().toISOString(),\n  workflow: (e.workflow && e.workflow.name) || '', node: ex.lastNodeExecuted || (tr.error && tr.error.node && tr.error.node.name) || 'trigger',\n  message: String(err.message || 'unknown error').slice(0, 1000),\n};\nconst bin = await this.helpers.prepareBinaryData(Buffer.from(JSON.stringify(data, null, 1)), 'error.json', 'application/json');\nreturn [{ json: data, binary: { data: bin } }];\n"
+   }
+  },
+  {
+   "id": "00000005-0000-4000-8000-000000000000",
    "name": "Error: write error.json",
    "type": "n8n-nodes-base.readWriteFile",
    "typeVersion": 1.1,
    "position": [
-    690,
+    920,
     0
    ],
    "parameters": {
@@ -64,19 +78,19 @@
    }
   },
   {
-   "id": "00000005-0000-4000-8000-000000000000",
+   "id": "00000006-0000-4000-8000-000000000000",
    "name": "Error: stop",
    "type": "n8n-nodes-base.noOp",
    "typeVersion": 1,
    "position": [
-    920,
+    1150,
     0
    ],
    "parameters": {}
   },
   {
-   "id": "00000006-0000-4000-8000-000000000000",
-   "name": "Note 6",
+   "id": "00000007-0000-4000-8000-000000000000",
+   "name": "Note 7",
    "type": "n8n-nodes-base.stickyNote",
    "typeVersion": 1,
    "position": [
@@ -84,7 +98,7 @@
     110
    ],
    "parameters": {
-    "content": "## ad-versions errors\nSet as the error workflow of **ad-versions**. For now: writes `runs/<id>/error.json` (node, message, time) and stops. The failing execution's id is the run id.\n\n**Later (12b):** delete any GPU pod the run started, then a Telegram message on the demo bot (credential `telegram-demo`) with the failing node's name.",
+    "content": "## ad-versions errors\nSet as the error workflow of **ad-versions**. For now: writes `runs/<id>/error.json` (node, message, time) and stops. The failing execution's id is the run id; a failure in the trigger itself has none and gets `trigger-<timestamp>`.\n\n**Later (12b):** delete any GPU pod the run started, then a Telegram message on the demo bot (credential `telegram-demo`) with the failing node's name.",
     "width": 900,
     "height": 200,
     "color": 7
@@ -93,6 +107,17 @@
  ],
  "connections": {
   "Error trigger": {
+   "main": [
+    [
+     {
+      "node": "Error: ids",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Error: ids": {
    "main": [
     [
      {

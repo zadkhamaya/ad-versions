@@ -18,7 +18,7 @@ def test_nothing_private_ships():
 
 def test_env_example_uses_placeholders():
     text = (ROOT / "docker" / ".env.example").read_text()
-    assert "n8n.example.com" in text and "the deploy user" in text and "TODO verify on the chosen tag" in text
+    assert "n8n.example.com" in text and "the deploy user" in text and "N8N_RESTRICT_FILE_ACCESS_TO=/data" in text and "EXECUTIONS_DATA_MAX_AGE=336" in text
     assert "PRELOAD_WHISPER=1" in text
 
 

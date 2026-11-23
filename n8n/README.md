@@ -5,7 +5,7 @@ Two exported workflows, credentials stripped (names kept):
 | File | Workflow | What it does |
 |---|---|---|
 | `workflow.json` | **ad-versions** | brief form → source clip → beats → scripts → compliance → look line → b-roll (dry run). Stops at the no-op `→ 12b: render`; rendering, QA, approval and handover come next. |
-| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time) and stops. Telegram and pod clean-up come with the live b-roll. |
+| `errors.json` | **ad-versions errors** | the error workflow of the one above: on any failure it writes `runs/<id>/error.json` (node, message, time) and stops; a failure in the trigger itself has no execution id, so its folder is `trigger-<timestamp>`. Telegram and pod clean-up come with the live b-roll. |
 
 Built and tested on n8n **2.46.6** (the tag pinned in `docker/.env`).
 
@@ -17,20 +17,27 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    Required disclaimer (pre-filled with the rulebook's), Source clip (`.mp4`/`.mov`), Source clip link (https, for a
    file over 90 MB; used instead of the upload when both are given), Beats, Look (optional), Dry run.
 2. **Run: ids and brief** → **Run: folder** (`POST /run`, because n8n's file nodes write only into an existing folder) →
-   **Source: link given?** → download (https only, response as file) or the upload → **Source: write source.mp4**.
+   **Rulebook: get** → **Disclaimer: must match the rulebook**: the form's disclaimer must equal the rulebook's (case,
+   spacing and punctuation ignored), else the run stops at once with "the brief's disclaimer differs from the approved one
+   in the rulebook"; the rulebook's text is the one that goes on the end card (`disclaimer` in the run state) →
+   **Source: link given?** → download (https only, redirects are not followed, so the check covers the whole fetch;
+   **Source: size cap** refuses a file over 95 MB, one constant in that node) or the upload → **Source: write source.mp4**.
 3. **Beats: parse** (Code) turns the Beats text into the service's `beats` (syntax below); **Beats: validate** is
    `POST /reframe` on the real clip: it refuses beats outside the clip, suggests windows for `auto` beats and draws the
    sheet. **Reframe: keep** stores the suggestions, the sheet path (`runs/<id>/reframe.jpg`) and the review/split flags.
-4. **Scripts**: `GET /rulebook` → one LLM call with structured output (`json_schema`, strict): 2 hooks, a voice-over line
+4. **Scripts**: one LLM call with structured output (`json_schema`, strict): 2 hooks, a voice-over line
    for 6, 15 and 30 s, 3 b-roll shots per hook, each shot an enum of the rulebook's `shots` → **Scripts: validate**
-   (shape, shots in the rulebook, word budgets noted).
-5. **Compliance**: `POST /lint` on every line and shot (the hard word list) → a second LLM call judges each against
-   `banned_media`, the approved claims and the tone (no testimonial lines, no outcomes) and returns
-   `{"<id>": {"ok", "rewrite"}}` → **apply 1** rewrites a failing line once (a failing shot is dropped, not rewritten) →
+   (shape, shots in the rulebook, word budgets noted; a hook that picks the same shot twice gets the duplicate replaced
+   by an unused rulebook shot, noted in `script_notes`).
+5. **Compliance**: `POST /lint` on every line and shot (the hard word list) → a second LLM call judges each **line**
+   against `banned_media`, the approved claims and the tone (no testimonial lines, no outcomes) and returns
+   `{"<id>": {"ok", "rewrite"}}`. B-roll shots are pre-approved in the rulebook, so only the word list checks them →
+   **apply 1** rewrites a failing line once (a shot with a word-list hit is dropped, not rewritten) →
    `POST /lint` again on the rewrites → **apply 2** drops a rewrite that still hits, drops a hook left without lines,
    and writes `compliance.notes` (each rewrite before → after, each drop and why). Line ids are `H1:6`, `H1:15`,
    `H1:30`; shot ids `H1:A`, `H1:B`, `H1:C`.
-6. **Look line** (spec 4.3 part 1): the Look field wins when filled; otherwise `POST /frames` at the middles of S1, S3
+6. **Look line** (spec 4.3 part 1): the Look field wins when filled and clean; it goes through `/lint` too, and on a hit
+   it is ignored (kept in the run data as `look_brief_rejected`) and the vision path runs. Otherwise `POST /frames` at the middles of S1, S3
    and S5 → the files are read and sent to the vision model with the spec's prompt → `POST /lint` on the line → one
    retry naming the hit words → the rulebook's `look_fallback`. The line (and where it came from: `brief`, `vision`
    or `fallback`) is kept in the run data.
@@ -38,8 +45,26 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    `/data/brand/fixtures/broll/` to `runs/<id>/broll/<hook><A|B|C>_<size>.mp4`: 12 files for two hooks, fewer when the
    compliance pass dropped a shot. The **live** branch (toolkit pods and `/api/broll`) is a disabled stub node plus a
    Stop and Error: the toolkit side is not deployed yet, so a run with Dry run unticked stops there on purpose.
-8. **Run data**: `runs/<id>/run.json` holds the whole run so far (brief, beats, reframe, scripts, compliance, look,
-   b-roll, LLM cost); **Run: summary** is the short view; **→ 12b: render** is where rendering will attach.
+8. **Run data**: `runs/<id>/run.json` holds the whole run so far (brief, beats, reframe, rulebook, scripts, compliance,
+   look, b-roll, LLM cost). **Run: state for 12b** hands that same object (no binary) to **→ 12b: render**, where
+   rendering attaches; **Run: summary** is a short side view for reading an execution.
+
+### What the run state holds (what 12b receives)
+
+`run_id`, `dry_run`, `source` (`runs/<id>/source.mp4`), `beats` (the service's shape), `reframe` (`beats`, `sheet`,
+`flags`), `rulebook`, `disclaimer` (the rulebook's), `brief`, `hooks` (`id`, `lines` by length, `broll` = 3 shot texts,
+`null` where dropped), `compliance` (`items`, `notes`), `look` (`line`, `source`), `broll` (`mode`, `clips`, `files`),
+`llm_usd`, and **`slots`**: per hook, `/render`'s `broll` argument ready to send, with the shot letters mapped
+**A → `slot1`, B → `slot2`, C → `slot3`**:
+
+```json
+{"H1": {"slot1": {"wide": "runs/<id>/broll/H1A_1344x768.mp4", "tall": "runs/<id>/broll/H1A_768x1344.mp4"},
+        "slot2": {...}, "slot3": {...}},
+ "H2": {...}}
+```
+
+A dropped shot leaves its slot out (the service then drops that cutaway). A hook dropped by compliance is not in `hooks`
+and not in `slots`.
 
 ## Credentials it expects, by name
 
@@ -88,6 +113,8 @@ S6 27.5-31.5 close 0.7 x1=0.42
 - The n8n container needs `N8N_RESTRICT_FILE_ACCESS_TO=/data` (n8n 2.x refuses file nodes outside its own folder
   otherwise). The compose file's env file is where it goes, next to `N8N_DEFAULT_BINARY_DATA_MODE=filesystem`,
   `N8N_PAYLOAD_SIZE_MAX=100` and `N8N_FORMDATA_FILE_SIZE_MAX=100`.
+- Execution history is pruned: `EXECUTIONS_DATA_PRUNE=true`, `EXECUTIONS_DATA_MAX_AGE=336` (hours, 14 days). A run keeps
+  the brief and three base64 frames in its execution data.
 - The media service must have `POST /run` (see `docs/api.md`).
 - The dry-run clips live in the data folder: `n8n/fixtures/make-broll.sh` makes them (`n8n/fixtures/broll/` ships in
   the repo, six files of about 85 KB); copy that folder to `/data/brand/fixtures/broll/` once.
@@ -100,6 +127,11 @@ S6 27.5-31.5 close 0.7 x1=0.42
 3. In **ad-versions** → Settings → Error workflow, pick **ad-versions errors**, and publish both (an error workflow
    must be active to run).
 4. Publish **ad-versions**; the form is at `/form/brief`.
+
+## Trust
+
+The brief's text goes into the script prompt unescaped. That is fine for one user behind Basic Auth; the hard word list
+and the transcript check are deterministic, so a brief cannot talk its way past them.
 
 ## Posting the form from a script
 
