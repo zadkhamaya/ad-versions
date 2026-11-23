@@ -100,7 +100,7 @@ def _qa_line(qa, note="") -> str:
     if not qa:
         return "no QA result" + (f"; note: {note}" if note else "")
     if qa.get("passed"):
-        return "passed" + (f"; note: {note}" if note else "")
+        return "QA passed" + (f"; note: {note}" if note else "")
     return "approved over QA: " + _one_line("; ".join(qa.get("reasons") or ["no reason given"])) + f" \u2014 {note or 'no note'}"
 
 
@@ -124,7 +124,7 @@ def _report(run: dict, rows: list[dict], rejected: list[dict], summary: dict) ->
     if run.get("mode"):
         out.append(f"- Mode: {_one_line(run['mode'])}")
     out += [f"- Turnaround: {turn}", "", "## Approved", ""]
-    out += [f"- {r['file']} ({r['version']}), QA {_qa_line(r['qa'], r.get('note'))}; approved by {_one_line(r['approver']) or 'n/a'} at {_one_line(r['approved_at']) or 'n/a'}" for r in rows] or ["- none"]
+    out += [f"- {r['file']} ({r['version']}), {_qa_line(r['qa'], r.get('note'))}; approved by {_one_line(r['approver']) or 'n/a'} at {_one_line(r['approved_at']) or 'n/a'}" for r in rows] or ["- none"]
     out += ["", "## Rejected", ""]
     out += [f"- {_one_line(x['version'])}: {_one_line(x.get('note') or 'no note')}" for x in rejected] or ["- none"]
     if run.get("review_note"):
