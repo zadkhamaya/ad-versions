@@ -1,5 +1,5 @@
 # The fictional brand's rules (spec §5). Read by the media service and pasted into the n8n script prompts.
-brand: BRAND   # placeholder until the name is chosen (Task 11)
+brand: Restfield
 disclaimer: "A clinician assesses every request. Care plans differ from person to person."
 look_fallback: "night interior, one warm practical lamp against cool blue window light, low key, muted teal and amber, 35mm, shallow depth of field, fine film grain"
 claims:

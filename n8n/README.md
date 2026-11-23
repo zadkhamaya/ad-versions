@@ -58,13 +58,14 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    a time through the steps below (an HTTP Request node with several items fires them all at once, and the media service
    renders one at a time, so the loop is what keeps each request inside its timeout).
 10. **Render: POST /render** (timeout 20 min): `source`, `beats`, the hook's `slots` as `broll` (left out for 6 s, which has
-    no cutaway), `vo_text` = the line, the rulebook's disclaimer and brand, `music` = `brand/music.m4a`, and
+    no cutaway), `vo_text` = the line, the rulebook's disclaimer and brand, `music` = `brand/music.m4a`, `logo` = `brand/logo.png`, and
     `voice` = `"stub"` or `"runpod"` from the form's Voice choice. An error answer (4xx, 5xx, a timeout) makes that version
     **failed** with the service's message; the loop goes on. A request that times out leaves the service still rendering that
     version, and the next request queues behind it: the 20 minutes and the loop's batch of 1, as built, are the safe pair
     (do not raise the batch).
 11. **QA** per rendered version: `POST /check`; `POST /transcribe` with the line as `script` (WER, banned words)
-    and the brief's brand name as `hotwords` (never the script: the check must stay independent);
+    and the brief's brand name as `hotwords` (never the script: the check must stay independent). With a hotword, the service
+    counts a split name as one word ("Rest Field" heard for Restfield), so a made-up brand does not fail the word check;
     `POST /frames` `at: "last"` → the vision model reads the end card's disclaimer back → compared with the
     rulebook's text ignoring case, spacing and punctuation. **QA: merge** builds `{passed, reasons}` as docs/api.md
     "How `qa` is merged": the render log's reasons, `/check`, `/transcribe`, and the disclaimer read. A QA call that fails
@@ -154,6 +155,11 @@ There is no music bed yet. `n8n/fixtures/make-music.sh <out.m4a>` makes a quiet 
 `brand/music.m4a` under the data root (on the box `~/.ad-versions/data/brand/music.m4a`) until the real bed exists. No
 logo is needed: the end card draws the brand name.
 
+**The brand is Restfield** (made up; `brand/rulebook.yaml`). Its wordmark, `brand/logo.png` (Lora, off-white on transparent, 1600 px wide,
+made by `brand/make-logo.sh` from the OFL font in `brand/fonts/`), goes to `brand/logo.png` under the data root too (on the box
+`~/.ad-versions/data/brand/logo.png`): `/render` is sent `logo: "brand/logo.png"`. The logo is optional for the service (a request with no `logo` gets the brand name drawn as text),
+but the workflow always sends the path, and a path that does not exist is a 404 for that version: copy the file before a real run.
+
 ### What the run state holds (what 12b receives)
 
 `run_id`, `dry_run` (stand-in b-roll), `voice_mode`, `broll_mode`, `source` (`runs/<id>/source.mp4`), `beats` (the service's shape), `reframe` (`beats`, `sheet`,
@@ -187,7 +193,9 @@ The LLM nodes are HTTP Request nodes, not the OpenAI nodes: with a custom base U
 ## Stand-in or real: Voice and B-roll
 
 Two separate dropdowns on the form, both defaulting to the stand-in (a post that leaves them out is a stand-in run).
-- **Voice**: *Stand-in (free, flite)* sends `voice: "stub"` to `/render`; *Real (RunPod)* sends `"runpod"`. Without the RunPod
+- **Voice**: *Stand-in (free, flite)* sends `voice: "stub"` to `/render`; *Real (RunPod)* sends `"runpod"`: a speak job on the
+  voice endpoint, which runs **VoxCPM2** (`model: "voxcpm2"`, params `seed 42, cfg_value 1.6, inference_timesteps 10`; brackets in a script are
+  turned into commas first, see docs/api.md). Without the RunPod
   and R2 environment in the media service every version fails with the service's message (for example `missing environment:
   VOICE_SAMPLE_KEY, ...`); the run records those as failed versions, and when none can be rendered it ends with that reason in
   `error.json`.
