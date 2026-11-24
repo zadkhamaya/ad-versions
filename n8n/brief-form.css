@@ -71,15 +71,6 @@ form.card { padding: 44px 48px 40px; }
   color: var(--ink);
   text-wrap: balance;
 }
-.form-header h1::after {
-  content: '';
-  display: inline-block;
-  width: 0.2em;
-  height: 0.72em;
-  margin-left: 0.2em;
-  border-radius: 999px;
-  background: var(--ink);
-}
 .form-header p {
   max-width: 54ch;
   padding-top: 12px;
