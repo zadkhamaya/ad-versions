@@ -13,3 +13,4 @@ __pycache__/
 out/
 docker/.env.local
 docs/overnight-report.md
+!docs/assets/*.mp4
