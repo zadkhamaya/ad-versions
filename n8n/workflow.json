@@ -20,51 +20,42 @@
       {
        "fieldLabel": "Brand",
        "fieldType": "text",
-       "requiredField": true,
-       "placeholder": "Restfield"
+       "requiredField": true
       },
       {
        "fieldLabel": "Product",
        "fieldType": "text",
-       "requiredField": true,
-       "placeholder": "Evening sleep consultation"
+       "requiredField": true
       },
       {
        "fieldLabel": "Audience",
        "fieldType": "text",
-       "requiredField": false,
-       "placeholder": "Adults who struggle to switch off"
+       "requiredField": false
       },
       {
        "fieldLabel": "Offer",
        "fieldType": "text",
-       "requiredField": true,
-       "placeholder": "First consultation free this month"
+       "requiredField": true
       },
       {
        "fieldLabel": "Key message 1",
        "fieldType": "text",
-       "requiredField": true,
-       "placeholder": "Care that fits around your evenings"
+       "requiredField": true
       },
       {
        "fieldLabel": "Key message 2",
        "fieldType": "text",
-       "requiredField": true,
-       "placeholder": "Book online in two minutes"
+       "requiredField": true
       },
       {
        "fieldLabel": "Key message 3",
        "fieldType": "text",
-       "requiredField": true,
-       "placeholder": "A short wait for a first appointment"
+       "requiredField": true
       },
       {
        "fieldLabel": "Required disclaimer",
        "fieldType": "text",
-       "requiredField": true,
-       "defaultValue": "A clinician assesses every request. Care plans differ from person to person.",
-       "placeholder": "Must match the approved disclaimer word for word"
+       "requiredField": true
       },
       {
        "fieldLabel": "Source clip",
@@ -76,39 +67,32 @@
       {
        "fieldLabel": "Source clip link",
        "fieldType": "text",
-       "requiredField": false,
-       "placeholder": "https://example.com/clip.mp4"
+       "requiredField": false
       },
       {
        "fieldLabel": "Shot list",
        "fieldType": "textarea",
-       "requiredField": true,
-       "placeholder": "0:00.5-0:06    opening, hook 1\n0:06.6-0:09.3  tension\n0:09.6-0:15    routine, follow the action\n0:15.5-0:21.5  opening, hook 2, tall crop 21%, square crop 30%\n0:21.9-0:26.8  calm, tall crop 35%\n0:27.5-0:31.5  close, tall crop 37%, square crop 42%"
+       "requiredField": true
       },
       {
        "fieldLabel": "Look",
        "fieldType": "text",
-       "requiredField": false,
-       "placeholder": "Warm evening light, soft focus"
+       "requiredField": false
       },
       {
        "fieldLabel": "Landing URL",
        "fieldType": "text",
-       "requiredField": false,
-       "placeholder": "https://example.com/sleep"
+       "requiredField": false
       },
       {
        "fieldLabel": "Call to action",
        "fieldType": "text",
-       "requiredField": false,
-       "defaultValue": "Learn More",
-       "placeholder": "Learn More"
+       "requiredField": false
       },
       {
        "fieldLabel": "Voice",
        "fieldType": "dropdown",
        "requiredField": false,
-       "defaultValue": "Stand-in (free, flite)",
        "fieldOptions": {
         "values": [
          {
@@ -124,7 +108,6 @@
        "fieldLabel": "B-roll",
        "fieldType": "dropdown",
        "requiredField": false,
-       "defaultValue": "Stand-in clips (no GPU)",
        "fieldOptions": {
         "values": [
          {

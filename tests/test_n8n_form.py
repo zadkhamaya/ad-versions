@@ -30,17 +30,12 @@ def test_no_extra_field_shifts_the_numbering():
 def test_dropdown_texts_are_matched_in_code_and_kept():
     opts = {f["fieldLabel"]: [o["option"] for o in f["fieldOptions"]["values"]] for f in FIELDS if f["fieldType"] == "dropdown"}
     assert opts == {"Voice": ["Stand-in (free, flite)", "Real (RunPod)"], "B-roll": ["Stand-in clips (no GPU)", "Live (pods)"]}
-    assert {f["fieldLabel"]: f["defaultValue"] for f in FIELDS if f["fieldType"] == "dropdown"} == {"Voice": "Stand-in (free, flite)", "B-roll": "Stand-in clips (no GPU)"}
-    defaults = {f["fieldLabel"]: f["defaultValue"] for f in FIELDS if f["fieldType"] == "text" and "defaultValue" in f}
-    assert defaults["Call to action"] == "Learn More" and defaults["Required disclaimer"].startswith("A clinician assesses")
 
 
-def test_every_text_field_shows_an_example():
+def test_the_plain_form_is_empty():
+    """Geoff 11-24: no placeholder, no default; a filled form is opened by the prefill link. The code supplies the defaults (harness)."""
     for f in FIELDS:
-        if f["fieldType"] in ("text", "textarea"):
-            assert f.get("placeholder", "").strip(), f["fieldLabel"]
-    shot = next(f for f in FIELDS if f["fieldLabel"] == "Shot list")["placeholder"]
-    assert len(shot.splitlines()) == 6 and shot.splitlines()[0].startswith("0:00.5-0:06")
+        assert not f.get("placeholder") and "defaultValue" not in f, f["fieldLabel"]
 
 
 def test_title_description_and_button():

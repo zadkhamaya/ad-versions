@@ -142,8 +142,7 @@ const FAKE_TOKEN = 'bot' + '123456789:' + 'A'.repeat(35);        // built at run
   ok(JSON.stringify(old.body) === JSON.stringify({ run_id: '77', source: { path: 'runs/77/source.mp4' }, beats: old.beats, formats: ['9X16', '1X1'] }), 'old syntax: the /reframe body shape');
   const plain = await parse(PLAIN);
   ok(JSON.stringify(plain.beats) === JSON.stringify(old.beats) && JSON.stringify(plain.body) === JSON.stringify(old.body), 'the plain-words block gives exactly the old syntax beats and body');
-  const formPh = wf.nodes.find((n) => n.name === 'Brief form').parameters.formFields.values.find((x) => x.fieldLabel === 'Shot list').placeholder;
-  ok(formPh === PLAIN && JSON.stringify((await parse(formPh)).beats) === JSON.stringify(old.beats), 'the form placeholder is the plain block, and it parses');
+  ok(JSON.stringify((await parse(PLAIN)).beats) === JSON.stringify(old.beats), 'the README block (plain words) parses to the old beats');
   ok(plain.beats.map((b) => b.name).join() === 'S1,S2,S3,S4,S5,S6' && plain.beats.map((b) => b.role).join() === 'opener-H1,tension,routine,opener-H2,calm,close', 'shots are named by position, roles mapped');
   const ROLES6 = ['opening, hook 1', 'tension', 'routine', 'opening, hook 2', 'calm', 'close'];
   const seconds = await parse(['0.5-6', '6.6-9.3', '9.6 - 15', '15.5–21.5', '21.9-26.8', '27.5-31.5'].map((l, i) => l + '  ' + ROLES6[i]).join('\n'));
@@ -185,6 +184,10 @@ const FAKE_TOKEN = 'bot' + '123456789:' + 'A'.repeat(35);        // built at run
   ok(rb1.brief.beats === PLAIN, 'Run: ids and brief reads the Shot list field');
   const rb2 = (await run(wf, RB, { input: { ...formIn, Beats: OLD } }))[0].json;
   ok(rb2.brief.beats === OLD, 'and still the old Beats label');
+  const rb3 = (await run(wf, RB, { input: { ...formIn, 'Shot list': PLAIN, 'Call to action': '', Voice: '', 'B-roll': '' } }))[0].json;
+  ok(rb3.brief.cta === 'Learn More' && rb3.voice_mode === 'stand-in' && rb3.broll_mode === 'stand-in' && rb3.dry_run === true, 'empty CTA, Voice and B-roll (an empty form) give Learn More and the stand-ins');
+  const rb4 = (await run(wf, RB, { input: { ...formIn, 'Shot list': PLAIN } }))[0].json;
+  ok(rb4.brief.cta === 'Learn More' && rb4.broll_mode === 'stand-in', 'missing CTA/Voice/B-roll fields give the same');
   ok(/needs a shot list/.test(await throws(run(wf, RB, { input: { ...formIn, 'Shot list': '  ' } }))), 'an empty shot list is refused in plain words');
   console.log(fails ? 'FAILED ' + fails : 'ALL PASS');
   process.exit(fails ? 1 : 0);
