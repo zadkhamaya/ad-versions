@@ -1,0 +1,190 @@
+<!doctype html>
+<!--
+OPEN before publishing: the name/contact line in the header, the tools line at the end, and assets/walkthrough.mp4 (final cut).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#F3EEE8" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0033FF" media="(prefers-color-scheme: dark)">
+<title>ad-versions: one brief, 18 ad versions</title>
+<meta name="description" content="A case study: one brief and one clip in, 18 checked, approved and packaged ad versions out, built with n8n and a Python/ffmpeg media service.">
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to the case study</a>
+<header class="top">
+  <div class="wrap bar">
+    <a class="brand" href="#top">Geofrie A. Putra</a>
+    <span class="page">Case study &middot; AI production</span>
+  </div>
+  <!-- TODO (owner): name and contact line -->
+</header>
+
+<main id="main">
+<div class="wrap hero" id="top">
+  <div class="hero-text">
+    <h1><span class="ln">One brief in.</span> <span class="ln">18 ad versions out.</span></h1>
+    <p class="lede">I built a workflow that takes one brief and one video clip and returns 18 ad versions, checked against a health brand's advertising rules, approved by a person and packaged for upload.</p>
+    <p class="links">
+      <a class="btn" href="#walkthrough">Watch the 90 s walkthrough</a>
+      <a class="tlink" href="https://github.com/zadkhamaya/ad-versions"><span>Repo: <span class="nw">github.com/zadkhamaya/ad-versions</span></span></a>
+    </p>
+  </div>
+  <div class="stats">
+    <div class="stat"><b>18</b><span>versions: 2 hooks &times; 3 lengths &times; 3 formats</span></div>
+    <div class="stat"><b>82 min</b><span>brief to package, review included (81 of them machine time)</span></div>
+    <div class="stat"><b>$0.02</b><span>cost per asset: GPU and model calls (voice not costed yet)</span></div>
+  </div>
+</div>
+
+<section id="brief" aria-labelledby="h-brief"><div class="wrap">
+  <h2 id="h-brief">The brief</h2>
+  <div class="split">
+    <div>
+      <p>A short n8n form. It asks for the brand, product, audience, offer, three key messages and the required disclaimer. It takes the source clip (an upload, or a link for big files) and a shot list in plain words: one line per shot with its time range, what it does in the ad and, where needed, where to crop. Optional fields set the look, landing URL, call to action, and whether voice and b-roll are stand-ins or real.</p>
+    </div>
+    <dl class="brief" aria-label="The brief from the recorded run">
+      <dt>Brand</dt><dd>Restfield (fictional)</dd>
+      <dt>Product</dt><dd>Online sleep clinic</dd>
+      <dt>Audience</dt><dd>Adults who sleep badly</dd>
+      <dt>Key messages</dt><dd>Talk to a sleep clinician from home. A plan built around your routine. Ongoing check-ins with your care team.</dd>
+      <dt>Disclaimer</dt><dd>A clinician assesses every request. Care plans differ from person to person.</dd>
+      <dt>Shot list</dt><dd><pre>0:00.5-0:06    opening, hook 1
+0:06.6-0:09.3  tension
+0:09.6-0:15    routine, follow the action
+0:15.5-0:21.5  opening, hook 2, tall crop 21%, square crop 30%
+0:21.9-0:26.8  calm, tall crop 35%
+0:27.5-0:31.5  close, tall crop 37%, square crop 42%</pre></dd>
+      <dt>Call to action</dt><dd>Learn More</dd>
+    </dl>
+  </div>
+</div></section>
+
+<section id="workflow" aria-labelledby="h-workflow"><div class="wrap">
+  <h2 id="h-workflow">The workflow</h2>
+  <div class="flow">
+    <figure>
+      <div class="frame shot"><a class="full" href="assets/workflow.png" aria-label="Open the full-size n8n workflow screenshot"><img src="assets/workflow.png" width="1600" height="900" alt="Screenshot of the n8n workflow canvas" onerror="this.parentNode.remove()"></a></div>
+      <figcaption>The recorded run in n8n, brief to package. The exported JSON is in the repo.</figcaption>
+    </figure>
+    <ol class="steps">
+      <li>Scripts: two hooks, with a voice-over line for each length.</li>
+      <li>Compliance: a word list and a second model pass; a failing line is rewritten once, then dropped.</li>
+      <li>B-roll: shots generated on a GPU pod on demand, then checked.</li>
+      <li>Voice-over and music: a synthetic voice, an instrumental bed.</li>
+      <li>Cut and reframe: one edit plan, three crops.</li>
+      <li>QA on every file.</li>
+      <li>Contact sheet of all versions.</li>
+      <li>Approval on Telegram.</li>
+      <li>Package: renamed files, manifest, report.</li>
+    </ol>
+  </div>
+</div></section>
+
+<section id="versions" aria-labelledby="h-versions"><div class="wrap">
+  <h2 id="h-versions">The 18 versions</h2>
+  <p class="measure">Two hooks, three lengths (6, 15, 30 s), three formats (9:16, 1:1, 16:9). Every file is named by one convention, such as <code>RESTFIELD_<wbr>ONLINESLEEPCLINIC_<wbr>H1_<wbr>15S_<wbr>9X16_<wbr>EN_<wbr>V01.mp4</code>.</p>
+  <figure style="margin-top:34px">
+    <div class="frame sheet"><a class="full" href="assets/sheet.jpg" aria-label="Open the full-size contact sheet"><img src="assets/sheet.jpg" width="1920" height="960" alt="Contact sheet: a frame from each of the 18 versions, each marked PASS or FAIL" onerror="this.parentNode.remove()"></a></div>
+    <figcaption>The contact sheet from the run, as the approver got it on Telegram. The two red cells failed QA.</figcaption>
+  </figure>
+  <div class="vids">
+    <figure><video class="v9" controls preload="metadata" poster="assets/poster-v1.jpg" src="assets/v1.mp4" aria-label="Sample version, 9:16"></video><figcaption>Hook 1, 15 s, 9:16</figcaption></figure>
+    <figure><video class="v1" controls preload="metadata" poster="assets/poster-v2.jpg" src="assets/v2.mp4" aria-label="Sample version, 1:1"></video><figcaption>Hook 1, 15 s, 1:1</figcaption></figure>
+    <figure><video class="v16" controls preload="metadata" poster="assets/poster-v3.jpg" src="assets/v3.mp4" aria-label="Sample version, 16:9"></video><figcaption>Hook 1, 15 s, 16:9</figcaption></figure>
+  </div>
+  <p class="note">Captions are burned into the picture; the voice-over text is in the manifest. The voice is synthetic.</p>
+</div></section>
+
+<section id="qa" aria-labelledby="h-qa"><div class="wrap">
+  <h2 id="h-qa">QA and guardrails</h2>
+  <div class="measure">
+    <p>Each version gets passed or failed with reasons. A failed render never stops the others. Four sources feed the verdict:</p>
+    <ul>
+      <li>the render log;</li>
+      <li>a format and loudness check: exact length and size, 24 fps, H.264 and AAC, &minus;14 LUFS, true peak under &minus;1 dBTP;</li>
+      <li>a transcript of the finished audio, compared with the approved script (word error rate at most 0.15) and scanned for banned words;</li>
+      <li>the end card: a vision model reads the disclaimer back and it must match the approved text.</li>
+    </ul>
+  </div>
+  <h3>The rulebook</h3>
+  <p class="measure">The rules are written for Australian advertising of a telehealth service. Prescription medicines cannot be advertised to the public, and the TGA counts indirect pointers, including visual cues.</p>
+  <div class="rules">
+    <div><strong>Banned words and claims</strong><ul><li>cure, treat, treatment</li><li>guaranteed, clinically proven, doctor recommended</li><li>before and after</li><li>medication, prescription, melatonin, sleeping pills</li><li>prices, offers, urgency</li></ul></div>
+    <div><strong>Banned in the picture</strong><ul><li>pills, packets, bottles, injection pens, pharmacy bags</li><li>white coats or stethoscopes as endorsement</li><li>a phone screen showing a treatment order</li><li>a person as reviewer, patient or clinician</li><li>anything implying a medical result</li></ul></div>
+  </div>
+  <h3>What QA stopped in this run</h3>
+  <p class="measure">Two of the 18 failed, both 30 s square versions. QA measures how far each b-roll clip's colour sits from the source footage after grading, and in each of the two one clip came out at 13.5 against a limit of 12. The contact sheet marked them FAIL and they stayed out of the package.</p>
+  <p class="measure">All 12 script lines passed compliance on the first pass, so nothing was rewritten this time. The rewrite path (one rewrite, then the line is dropped) is covered by the workflow's tests.</p>
+</div></section>
+
+<section id="manifest" aria-labelledby="h-manifest"><div class="wrap">
+  <h2 id="h-manifest">Manifest excerpt</h2>
+  <p class="measure" style="margin-bottom:22px">The package holds the 16 approved files, a CSV laid out for Meta's bulk import, a JSON manifest with hook, script, QA and approver per file, and a run report.</p>
+  <div class="scroll" tabindex="0" role="region" aria-label="Manifest excerpt table, scrolls sideways"><table>
+    <thead><tr><th scope="col">Ad name</th><th scope="col">Ad set</th><th scope="col">Body</th><th scope="col">CTA</th></tr></thead>
+    <tbody>
+      <tr><td class="f">RESTFIELD_<wbr>ONLINESLEEPCLINIC_<wbr>H1_<wbr>6S_<wbr>9X16_<wbr>EN_<wbr>V01</td><td>ONLINESLEEPCLINIC_9X16</td><td>With Restfield, you can talk to a sleep clinician from home.</td><td>Learn More</td></tr>
+      <tr><td class="f">RESTFIELD_<wbr>ONLINESLEEPCLINIC_<wbr>H1_<wbr>15S_<wbr>1X1_<wbr>EN_<wbr>V01</td><td>ONLINESLEEPCLINIC_1X1</td><td>When nights feel long, you do not have to figure it out alone. With Restfield, you can talk to a sleep clinician from home, and get a plan built around your routine.</td><td>Learn More</td></tr>
+      <tr><td class="f">RESTFIELD_<wbr>ONLINESLEEPCLINIC_<wbr>H2_<wbr>6S_<wbr>16X9_<wbr>EN_<wbr>V01</td><td>ONLINESLEEPCLINIC_16X9</td><td>Restfield gives you a sleep plan built around your daily routine.</td><td>Learn More</td></tr>
+      <tr><td class="f">RESTFIELD_<wbr>ONLINESLEEPCLINIC_<wbr>H2_<wbr>15S_<wbr>9X16_<wbr>EN_<wbr>V01</td><td>ONLINESLEEPCLINIC_9X16</td><td>Your schedule is already full, so sleep care should fit into your life. Restfield gives you a plan built around your routine, and lets you talk to a sleep clinician from home.</td><td>Learn More</td></tr>
+    </tbody>
+  </table></div>
+</div></section>
+
+<section id="report" aria-labelledby="h-report"><div class="wrap">
+  <h2 id="h-report">Run report</h2>
+  <p class="measure">Every run writes a report with three numbers. These are from the recorded run on 24 November 2026, with real voice-over and b-roll generated live.</p>
+  <div class="nums">
+    <div><b>16 of 18</b><span>assets per shoot: approved versions</span></div>
+    <div><b>$0.02</b><span>cost per asset: 42 GPU minutes at the pod's rate plus model calls, divided by approved files. Voice is not costed yet</span></div>
+    <div><b>81 / 82 min</b><span>machine time to review-ready / total with review</span></div>
+  </div>
+  <p class="measure" style="margin-top:22px">Where the time went: 22 min for the GPU pod to boot and load the model, 20 min for 12 b-roll clips, 38 min to render and check 18 versions one at a time on two CPU cores, and 1 min for the review on a phone.</p>
+</div></section>
+
+<section id="walkthrough" aria-labelledby="h-walkthrough"><div class="wrap">
+  <h2 id="h-walkthrough">90 second walkthrough</h2>
+  <figure>
+    <video class="player" controls preload="metadata" poster="assets/poster-walkthrough.jpg" src="assets/walkthrough.mp4" aria-label="Screen recording of a full run, 90 seconds"></video>
+    <figcaption>The recorded run, brief to package, sped up where nothing happens. The clock in the corner shows real time.</figcaption>
+  </figure>
+</div></section>
+
+<section id="built" aria-labelledby="h-built"><div class="wrap">
+  <h2 id="h-built">How it is built, and what is a stand-in</h2>
+  <p class="measure">n8n runs the flow. A Python and ffmpeg media service, in Docker next to it on a two-core VPS, renders and checks. Models read scripts, judge compliance and read the end card. Video generation runs on a GPU pod on demand and is deleted after the run. Whisper runs on the CPU.</p>
+  <div class="pair">
+    <div>
+      <h3>Synthetic media, disclosed</h3>
+      <ul>
+        <li>The person in the source clip is AI-generated, used as lifestyle talent only: never speaking to camera, never a patient or clinician.</li>
+        <li>The voice is designed from a text description. No real person is cloned.</li>
+        <li>The music was generated in-house, an instrumental at 72 bpm.</li>
+        <li>The b-roll is generated live by a text-to-video model, with no people in it.</li>
+        <li>Every version is marked <code>synthetic_media: yes</code> in the manifest.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Not production</h3>
+      <ul>
+        <li>Restfield is a made-up brand. A real brand brings its own approved disclaimer and legal sign-off.</li>
+        <li>The package stands in for platform upload. Production would push to the ad platforms' APIs.</li>
+        <li>The clip stands in for a real shoot. A real clip goes through the same upload path.</li>
+      </ul>
+    </div>
+  </div>
+  <!-- TODO (owner): decide whether to add "Built with AI coding assistants." -->
+  <p class="todo ph">TODO (owner): tools line, for example &ldquo;Built with AI coding assistants.&rdquo;</p>
+</div></section>
+</main>
+
+<footer><div class="wrap"><div class="close">
+  <span class="name">Geofrie A. Putra</span>
+  <p>Repo: <a href="https://github.com/zadkhamaya/ad-versions">github.com/zadkhamaya/ad-versions</a></p>
+</div></div></footer>
+</body>
+</html>
