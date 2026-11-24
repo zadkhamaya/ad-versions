@@ -81,3 +81,14 @@ def test_groups_sit_on_fields_one_five_nine_and_thirteen():
     optional = {int(n) for n in re.findall(r":nth-child\((\d+)\) label::after", css)}
     assert {labels[i - 1] for i in optional} == {"Audience", "Look", "Landing URL", "Call to action"}
     assert not any(f["requiredField"] for f in FIELDS if f["fieldLabel"] in {labels[i - 1] for i in optional})
+
+
+def test_the_page_answers_at_once_by_css():
+    """The review form later in the workflow makes n8n treat this page as multi-page (no Form Trigger option changes it: the page keeps
+    polling until the run reaches the review form). So from the click on (button disabled) the card shows the received text."""
+    css = FORM["options"]["customCss"]
+    assert ".inputs-wrapper," in css and "form.card:has(#submit-btn:disabled)" in css
+    assert "content: 'Brief received'" in css
+    assert "content: 'The run has started. The contact sheet comes to Telegram when the versions are checked.'" in css
+    waits = [n for n in WF["nodes"] if n["type"] == "n8n-nodes-base.wait" and n["parameters"].get("resume") == "form"]
+    assert waits, "the review form is a Wait node resumed by a form: that is what holds the page open"
