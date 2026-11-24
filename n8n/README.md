@@ -307,8 +307,9 @@ is downloaded (the body must be an mp4) and written.
 alone and noted in `broll.pod_delete`. A delete that fails stops the run, so the error workflow tries again and tells you.
 Any failure in a `B-roll live: ...` node ends in the error workflow. Its pod clean-up is its own branch from the first node (it does not wait for the media service or the disk, and a down media service cannot stop the
 Telegram message): it reads `runs/<id>/pod.json`; with no pod.json it deletes nothing. Otherwise it reads the toolkit address, asks `GET /api/pods`, and deletes the pod only if its name is the one recorded
-(or, when the deploy never answered and only `requested_at` is there, a pod launched after the request); a pod still `launching` cannot be deleted yet, so it asks again every 30 s for up to 10 minutes and then
-logs `left for the idle timer`. A pod it did not deploy, and any build host, is left alone. The outcome is `pod_cleanup` in error.json and a line in the Telegram message. Pods that outlive both are caught by the
+(or, only when the deploy got no answer at all and pod.json holds just `requested_at`, a pod launched within 125 s after the request, the deploy's 120 s timeout plus slack). A deploy the toolkit answered with a refusal (a 409
+such as "A VM is already on this page", for instance because the owner started a pod by hand at the same moment) writes `refused: <status>` into pod.json first, and then nothing is ever deleted for that run. A pod still `launching`
+cannot be deleted yet, so the clean-up asks again every 30 s for up to 10 minutes and then logs `left for the idle timer`; the Telegram alert can therefore come up to 10 minutes late when it is still retrying. A pod it did not deploy, and any build host, is left alone. The outcome is `pod_cleanup` in error.json and a line in the Telegram message. Pods that outlive both are caught by the
 toolkit's 30-minute idle delete and the cap.
 
 ## Not built yet

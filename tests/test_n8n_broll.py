@@ -27,7 +27,7 @@ def test_the_stub_is_gone_and_the_live_branch_hangs_off_the_b_roll_switch():
     assert "B-roll live: not deployed" not in BY and not any("stub" in k for k in BY)
     assert targets(WF["connections"], "B-roll: dry run?", 0) == ["B-roll: read stand-in clips"]
     assert targets(WF["connections"], "B-roll: dry run?", 1) == [P + "read config"]
-    assert len(LIVE) == 37
+    assert len(LIVE) == 38
 
 
 def test_every_toolkit_call_uses_the_credential_by_name_and_the_configured_address():
@@ -58,7 +58,9 @@ def test_the_deploy_asks_for_the_pods_page_defaults_for_h3_t2v_after_a_catalog_c
     assert sources(c, P + "POST /api/pods/deploy") == [P + "write pod.json (request)"]      # nothing deploys without the catalog check and a pod.json on disk
     assert BY[P + "write pod.json (request)"].get("onError") is None                       # a pod.json that cannot be written stops the run before any deploy
     assert targets(c, P + "POST /api/pods/deploy") == [P + "deploy result"] and targets(c, P + "deploy result") == [P + "write pod.json (name)"]
-    assert targets(c, P + "write pod.json (name)") == [P + "wait for the pod"]
+    assert targets(c, P + "write pod.json (name)") == [P + "deploy outcome"] and targets(c, P + "deploy outcome") == [P + "wait for the pod"]
+    assert "throw" not in BY[P + "deploy result"]["parameters"]["jsCode"]                  # the refusal is thrown only after pod.json says `refused`
+    assert "refused: r.statusCode" in BY[P + "deploy result"]["parameters"]["jsCode"] and "throw new Error(R.error_message)" in BY[P + "deploy outcome"]["parameters"]["jsCode"]
     for n in ("write pod.json (request)", "write pod.json (name)"):
         assert BY[P + n]["parameters"]["fileName"] == "=/data/runs/{{ $execution.id }}/pod.json"
     assert "h3-t2v" in BY[P + "catalog check"]["parameters"]["jsCode"]
@@ -133,6 +135,8 @@ def test_the_error_workflow_deletes_only_the_pod_this_run_deployed_and_does_not_
             assert n.get("onError") == "continueRegularOutput", n["name"]                       # a failed clean-up must not stop the failure message
     own = EBY[E + "is there a pod to delete?"]["parameters"]["jsCode"]
     assert "vm.name === R.pod_name" in own and "was not deployed by this run" in own and "launched_at" in own
+    assert "R.requested_ms + 125000" in own                                                      # the launch-time rule is bounded to the deploy's 120 s window
+    assert "d.refused" in EBY[E + "pod record"]["parameters"]["jsCode"]                          # a refused deploy: nothing is deleted
     assert "pod_cleanup" in EBY[E + "build error.json"]["parameters"]["jsCode"] and "d.pod_cleanup" in EBY[E + "Telegram text"]["parameters"]["jsCode"]
     assert targets(c, E + "write error.json") == [E + "read Telegram config"]                    # the Telegram path is the one it was
 

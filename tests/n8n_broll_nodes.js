@@ -102,11 +102,22 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   const pqd = JSON.parse(pq.binary.data.text);
   ok(pq.binary.data.name === 'pod.json' && /^\d{4}-\d\d-\d\dT/.test(pqd.requested_at) && pqd.requested_ms > 0 && !('name' in pqd) && pq.json.pod_request.requested_ms === pqd.requested_ms, 'pod.json (before the deploy): requested_at only');
   const dep = (r) => run(wf, P + 'deploy result', { nodes: { [P + 'pod decision']: decOut, [P + 'pod request']: pq.json }, input: r });
+  const depThrows = async (r) => { const out = (await dep(r))[0]; return throws(run(wf, P + 'deploy outcome', { nodes: { [P + 'deploy result']: out.json }, input: out.json })); };
   const dd = (await dep({ statusCode: 202, body: { vm: { name: 'swarm-pod-x' } } }))[0];
   const ddj = JSON.parse(dd.binary.data.text);
   ok(dd.json.pod_name === 'swarm-pod-x' && dd.json.next === 'wait' && dd.json.live.clips.length === 12 && ddj.name === 'swarm-pod-x' && ddj.requested_ms === pqd.requested_ms, 'deploy: 202 -> pod.json now names the pod and keeps requested_at');
-  ok(/refused to deploy.*409.*premium A6000 is out of stock: ask the owner/.test(await throws(dep({ statusCode: 409, body: { error: 'No Premium A6000 is free', confirm: 'plain' } }))), 'deploy: the plain-A6000 question is the owner\'s');
-  ok(/pod address could not be probed/.test(await throws(dep({ statusCode: 409, body: { error: 'Can\'t tell', confirm: 'tunnel' } }))) && /refused to deploy the GPU pod \(409\): The Massed balance/.test(await throws(dep({ statusCode: 409, body: { error: 'The Massed balance $1.00 is under 2 h' } }))), 'deploy: other refusals carry the toolkit\'s words');
+  ok(/refused to deploy.*409.*premium A6000 is out of stock: ask the owner/.test(await depThrows(({ statusCode: 409, body: { error: 'No Premium A6000 is free', confirm: 'plain' } }))), 'deploy: the plain-A6000 question is the owner\'s');
+  ok(/pod address could not be probed/.test(await depThrows(({ statusCode: 409, body: { error: 'Can\'t tell', confirm: 'tunnel' } }))) && /refused to deploy the GPU pod \(409\): The Massed balance/.test(await depThrows(({ statusCode: 409, body: { error: 'The Massed balance $1.00 is under 2 h' } }))), 'deploy: other refusals carry the toolkit\'s words');
+  // a refused deploy writes `refused` into pod.json BEFORE the run stops; no answer leaves requested_at as it was
+  const rf = (await dep({ statusCode: 409, body: { error: 'A VM is already on this page (swarm-pod-owner, ready).' } }))[0];
+  const rfd = JSON.parse(rf.binary.data.text);
+  ok(rf.json.refused === true && /^409: A VM is already on this page/.test(rfd.refused) && !('name' in rfd) && rfd.requested_ms === pqd.requested_ms && /refused to deploy the GPU pod \(409\)/.test(rf.json.error_message), 'deploy: a 409 writes refused: 409: ... into pod.json, then the next node throws');
+  const na = (await dep({ error: { message: 'timeout of 120000ms exceeded' } }))[0];
+  const nad = JSON.parse(na.binary.data.text);
+  ok(na.json.refused === false && nad.no_answer === true && !('refused' in nad) && !('name' in nad) && /no answer/.test(na.json.error_message), 'deploy: no answer (timeout) leaves requested_at, marks no_answer');
+  ok(/refused to deploy the GPU pod \(409\): A VM is already on this page/.test(await throws(run(wf, P + 'deploy outcome', { nodes: { [P + 'deploy result']: rf.json }, input: rf.json }))), 'deploy outcome: throws the refusal after the write');
+  const ok202 = (await run(wf, P + 'deploy outcome', { nodes: { [P + 'deploy result']: dd.json }, input: dd.json }))[0].json;
+  ok(ok202.next === 'wait' && ok202.pod_name === 'swarm-pod-x', 'deploy outcome: a 202 goes on to the wait');
   const depNode = node(wf, P + 'POST /api/pods/deploy');
   ok(depNode.parameters.jsonBody === "={{ { cap_hours: 8, bundles: ['h3-t2v'], addons: [] } }}", 'deploy: the Pods page\'s body for a pod with one bundle (cap 8 h, no image, product default)');
 
@@ -267,6 +278,8 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   ok(pr1.pod_name === 'swarm-pod-test' && askOwn({}, pr1), 'clean-up: pod.json with a name = a pod this run deployed');
   pr1 = await rec0('{"requested_at":"x","requested_ms":' + (Date.now() - 600000) + '}');
   ok(!pr1.pod_name && pr1.requested_ms > 0 && askOwn({}, pr1), 'clean-up: pod.json with only requested_at (the deploy never answered) still counts');
+  pr1 = await rec0('{"requested_at":"x","requested_ms":' + (Date.now() - 600000) + ',"refused":"409: A VM is already on this page"}');
+  ok(!askOwn({}, pr1) && /^left alone: the deploy was refused \(409/.test(pr1.cleanup), 'clean-up: pod.json says refused -> nothing is deleted (a pod the owner started by hand while our deploy was in flight is left alone)');
   for (const bad of [null, '{x', '{}', '{"name": ""}']) { const x = await rec0(bad); ok(/^(no pod to delete|left alone)/.test(x.cleanup) && !askOwn({}, x), 'clean-up: pod.json ' + (bad === null ? 'missing' : bad) + ' -> nothing is deleted: ' + x.cleanup); }
   const addr = async (text) => (await run(er, EN + 'toolkit address', { input: text === null ? {} : { ok: 1 }, binaries: text === null ? null : [text] }))[0].json;
   ok((await addr(CFG)).toolkit_url === 'https://toolkit.example.com' && /not read/.test((await addr(null)).cleanup) && /not valid JSON/.test((await addr('{x')).cleanup) && /no usable toolkit_url/.test((await addr('{"toolkit_url":"ftp://x"}')).cleanup), 'clean-up: address from the config, never throws');
@@ -282,6 +295,9 @@ const planOut = async (S = Sbase(), cfg = CFG) => (await run(wf, P + 'plan', { n
   del = await podQ(vmv({ name: 'swarm-pod-any' }), UNNAMED);
   ok(del.delete === true, 'clean-up: no name recorded, a pod launched after the request is ours');
   ok((await podQ(vmv({ launched_at: TQ / 1000 - 3600 }), UNNAMED)).delete === false && /not deployed by this run/.test((await podQ(vmv({ launched_at: TQ / 1000 - 3600 }), UNNAMED)).cleanup), 'clean-up: no name recorded, a pod launched before the request is left alone');
+  const inWin = await podQ(vmv({ name: 'swarm-pod-any', launched_at: TQ / 1000 + 110 }), UNNAMED);
+  const afterWin = await podQ(vmv({ name: 'swarm-pod-any', launched_at: TQ / 1000 + 130 }), UNNAMED);
+  ok(inWin.delete === true && afterWin.delete === false && /not deployed by this run/.test(afterWin.cleanup), 'clean-up: no answer from the deploy, a pod launched inside the 125 s window is deleted, one launched after it is left alone');
   ok(/left alone: swarm-build-x/.test((await podQ(vmv({ name: 'swarm-build-x', kind: 'build', launched_at: TQ / 1000 + 5 }), UNNAMED)).cleanup), 'clean-up: a build host is never ours');
   ok(/already being deleted/.test((await podQ(vmv({ state: 'deleting', actions: { delete: false } }), NAMED)).cleanup), 'clean-up: already being deleted');
   const lau = await podQ(vmv({ state: 'launching', actions: { delete: false } }), NAMED);
