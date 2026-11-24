@@ -1,6 +1,6 @@
 /* ad-versions case study: zadkhamaya kit v2 (719-lab-os/brand-kit/DESIGN.md).
    Light: Canvas White ground, White cards, Ultra Blue ink, Latent Indigo secondary text, one Signal Pink port
-   (the walkthrough button). Dark: the kit's other ground, Ultra Blue, with Canvas text and 1.5px hairline cards.
+   (the walkthrough button). Light only: Ultra Blue is kept for the header and footer bands (Geoff 11-24).
    No shadows, no borders (inset edges), capsule buttons, 28/18px containers. Fonts self-hosted, no outside requests. */
 @font-face { font-family: "Unbounded"; font-weight: 200 900; font-display: swap; src: url(fonts/unbounded.woff2) format("woff2"); }
 @font-face { font-family: "Plus Jakarta Sans"; font-weight: 200 800; font-display: swap; src: url(fonts/plus-jakarta-sans.woff2) format("woff2"); }
@@ -22,8 +22,8 @@
   --card: var(--white);
   --edge-card: 0 0 0 0 transparent; --edge-band: none;        /* cards carry tone, not an edge, on Canvas */
   --divider: rgba(0, 51, 255, .18);
-  --band: var(--blue);                     /* the document band and the "18" tile */
-  --on-band: var(--canvas);
+  --band: var(--white);                    /* run-report rows: white cards on Canvas */
+  --on-band: var(--indigo);
   --on-band-soft: rgba(243, 238, 232, .85);
   --btn: var(--blue); --on-btn: var(--canvas);
   --focus: var(--indigo);
@@ -34,26 +34,9 @@
   --sel-bg: rgba(0, 51, 255, .18); --sel-fg: var(--indigo);
   color-scheme: light;
 }
-@media (prefers-color-scheme: dark) {
-  :root {
-    --ground: var(--blue); --ink: var(--canvas); --text: rgba(243, 238, 232, .85); --text-3: rgba(243, 238, 232, .85);
-    --card: transparent; --edge-card: inset 0 0 0 1.5px rgba(243, 238, 232, .4); --edge-band: inset 0 0 0 1.5px var(--canvas);
-    --divider: rgba(243, 238, 232, .3);
-    --band: transparent; --on-band: var(--canvas); --on-band-soft: rgba(243, 238, 232, .85);
-    --btn: var(--white); --on-btn: var(--blue);
-    --focus: var(--canvas);
-    --ph-line: rgba(243, 238, 232, .85);
-    --code-bg: rgba(243, 238, 232, .12);
-    --edge-ink: inset 0 0 0 1.5px rgba(243, 238, 232, .62);
-    --arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 12' fill='none' stroke='%23F3EEE8' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 6h17M13 1l5 5-5 5'/%3E%3C/svg%3E");
-    --sel-bg: var(--canvas); --sel-fg: var(--blue);
-    color-scheme: dark;
-  }
-}
 
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; scrollbar-color: rgba(25, 18, 61, .35) transparent; }
-@media (prefers-color-scheme: dark) { html { scrollbar-color: rgba(243, 238, 232, .5) transparent; } }
 body { margin: 0; background: var(--ground); color: var(--text); font-family: var(--font-text); font-size: 17px; font-weight: 400; line-height: 1.55;
        -webkit-font-smoothing: antialiased; text-wrap: pretty; caret-color: var(--ink); }
 ::selection { background: var(--sel-bg); color: var(--sel-fg); }
@@ -72,14 +55,15 @@ a:hover { text-decoration: underline; text-decoration-thickness: 1.5px; text-und
 .num { font-variant-numeric: tabular-nums; }
 
 /* header: the kit's band, name left, the page's context as the active item (no kicker above the heading) */
-header.top { position: relative; }
-header.top::after { content: ""; display: block; height: 1px; background: var(--divider); }
+header.top { position: relative; background: var(--blue); }
 .bar { display: flex; align-items: center; justify-content: space-between; gap: 10px 22px; min-height: 96px; padding-top: 14px; padding-bottom: 14px; }
 .brand { display: block; flex: none; line-height: 0; }
-.brand { font-family: var(--font-display); font-weight: 500; font-size: 22px; line-height: 1.2; letter-spacing: -0.01em; color: var(--ink); }
-.brand:hover { text-decoration: none; color: var(--text); }
-.page { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; color: var(--ink); }
-.page::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 4px; background: var(--ink); }
+.brand { font-family: var(--font-display); font-weight: 500; font-size: 22px; line-height: 1.2; letter-spacing: -0.01em; color: var(--canvas); }
+.brand:hover { text-decoration: none; color: var(--white); }
+header.top a { color: var(--canvas); }
+header.top :focus-visible { outline-color: var(--canvas); }
+.page { display: inline-flex; align-items: center; gap: 10px; font-weight: 600; font-size: 15px; color: var(--canvas); }
+.page::before { content: ""; flex: none; width: 8px; height: 8px; border-radius: 4px; background: var(--canvas); }
 
 /* hero */
 .hero { padding-top: 64px; padding-bottom: 72px; }
@@ -141,7 +125,6 @@ dl.brief pre { margin: 0; font: 500 12px/1.7 var(--font-mono); white-space: pre-
 .frame a.full { display: block; align-self: stretch; justify-self: stretch; }
 .frame img { display: block; width: 100%; height: 100%; object-fit: contain; }
 .frame.ph { --ph-line: rgba(243, 238, 232, .85); }
-@media (prefers-color-scheme: dark) { .frame { box-shadow: inset 0 0 0 1.5px rgba(243, 238, 232, .4); } }
 figcaption { margin-top: 12px; font-size: 14px; line-height: 1.45; color: var(--text-3); }
 .shot { aspect-ratio: 16 / 9; }
 .sheet { aspect-ratio: 2 / 1; }
@@ -189,7 +172,7 @@ tbody tr:last-child td { border-bottom: 0; }
 .nums { display: grid; gap: 10px; max-width: 760px; margin-top: 22px; }
 .nums > div { box-shadow: var(--edge-card); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 22px; min-height: 56px; padding: 12px 26px; border-radius: 18px;
               background: var(--band); color: var(--on-band); }
-.nums b { margin-left: auto; font: 500 20px/1.2 var(--font-mono); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
+.nums b { color: var(--ink); margin-left: auto; font: 500 20px/1.2 var(--font-mono); letter-spacing: -0.01em; font-variant-numeric: tabular-nums; }
 .nums span { order: -1; flex: 1 1 260px; font-size: 14px; line-height: 1.4; color: var(--on-band); }
 .nums + .ph-note { margin-top: 14px; }
 
@@ -197,7 +180,6 @@ tbody tr:last-child td { border-bottom: 0; }
 .player { display: block; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; border-radius: 28px; object-fit: cover; background-color: var(--indigo);
           background-image: linear-gradient(180deg, transparent 12%, var(--blue) 62%), radial-gradient(circle, rgba(243, 238, 232, .28) 1.6px, transparent 2.2px);
           background-size: 100% 100%, 9px 9px; }
-@media (prefers-color-scheme: dark) { .player, .vids video { box-shadow: inset 0 0 0 1.5px rgba(243, 238, 232, .4); } }
 
 /* built */
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 34px; }
@@ -207,14 +189,13 @@ tbody tr:last-child td { border-bottom: 0; }
 .todo { display: inline-block; margin-top: 22px; padding: 14px 22px; border-radius: 18px; font-size: 15px; line-height: 1.45; color: var(--text); }
 
 /* footer: the kit's closing block on blue */
-footer { padding: 0 0 48px; }
-.close { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px 34px; padding: 34px 40px; border-radius: 28px; background: var(--blue); color: var(--canvas); }
+footer { background: var(--blue); margin-top: 24px; }
+.close { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 18px 34px; padding: 40px 0 48px; color: var(--canvas); }
 .close .name { font-family: var(--font-display); font-weight: 500; font-size: 22px; line-height: 1.2; letter-spacing: -0.01em; color: var(--canvas); }
 .close p { font-size: 15px; color: var(--canvas); }
 .close a { white-space: nowrap; color: var(--canvas); font-weight: 600; text-decoration: underline; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 .close a:hover { color: var(--white); }
 .close :focus-visible { outline-color: var(--canvas); }
-@media (prefers-color-scheme: dark) { .close { background: transparent; box-shadow: inset 0 0 0 1.5px rgba(243, 238, 232, .4); } }
 
 @media (max-width: 1000px) {
   .hero { padding-top: 44px; padding-bottom: 56px; }
@@ -236,7 +217,7 @@ footer { padding: 0 0 48px; }
   dl.brief dt { padding: 14px 0 0; border-top: 1px solid var(--divider); } dl.brief dd { padding: 4px 0 0; border-top: 0; }
   dl.brief dt:first-of-type { border-top: 0; padding-top: 10px; }
   .nums > div { padding: 12px 20px; } .nums b { margin-left: 0; }
-  .close { padding: 26px 22px; }
+  .close { padding: 30px 0 36px; }
   .btn { height: 52px; }
   .tlink { font-size: 15px; }
   .bar { gap: 10px 12px; min-height: 72px; } .brand { font-size: 18px; }
