@@ -1,0 +1,269 @@
+/* The look of the Brief form (brand kit v2): Canvas ground, one white card, Ultra Blue ink, capsule controls,
+   Unbounded for the title and group headings, Plus Jakarta Sans for reading, Martian Mono for labels and the shot list.
+   Presentation only: no field is added, so field-0 to field-15 keep their order and numbers.
+   This file is the source; the Brief form node option Custom Form Styling holds the same text (tests/test_n8n_form.py
+   checks they are equal). The form page of n8n strips tags from the CSS and treats it as text, so the CSS has no double
+   quotes and no apostrophes in it. */
+@import url('https://fonts.googleapis.com/css2?family=Martian+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Unbounded:wght@400;500;600&display=swap');
+
+:root {
+  --font-family: 'Plus Jakarta Sans', 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Unbounded', 'Arial Rounded MT Bold', Verdana, sans-serif;
+  --font-mono: 'Martian Mono', Menlo, 'Courier New', monospace;
+  --ink: #0033FF;
+  --canvas: #F3EEE8;
+  --indigo: #19123D;
+  --soft: #4A4468;
+  --hair: rgba(0, 51, 255, 0.55);
+  --rule: rgba(0, 51, 255, 0.18);
+  --pink: #FF2E9A;
+
+  --font-size-body: 16px;
+  --font-size-label: 11px;
+  --font-size-input: 15px;
+  --font-size-paragraph: 16px;
+  --font-size-error: 13px;
+  --color-background: var(--canvas);
+  --color-card-bg: #FFFFFF;
+  --color-card-border: transparent;
+  --color-card-shadow: transparent;
+  --color-header: var(--ink);
+  --color-link: var(--indigo);
+  --color-label: var(--indigo);
+  --color-input-border: transparent;
+  --color-input-text: var(--indigo);
+  --color-input-bg: #FFFFFF;
+  --color-focus-border: transparent;
+  --color-submit-btn-bg: var(--ink);
+  --color-submit-btn-text: var(--canvas);
+  --color-required: var(--ink);
+  --color-error: #B0002A;
+  --color-clear-button-bg: var(--indigo);
+  --border-radius-card: 28px;
+  --border-radius-input: 999px;
+  --padding-form-input: 0 22px;
+  --box-shadow-card: inset 0 0 0 1.5px var(--rule);
+  --container-width: min(760px, calc(100% - 32px));
+  --submit-btn-height: 52px;
+  --opacity-placeholder: 1;
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  background: var(--canvas);
+  color: var(--indigo);
+  font-family: var(--font-family);
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+::selection { background: var(--ink); color: var(--canvas); }
+.container { text-align: left; padding-top: 48px; padding-bottom: 56px; }
+
+/* card and header */
+form.card { padding: 44px 48px 40px; }
+.form-header h1 {
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 32px;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-wrap: balance;
+}
+.form-header h1::after {
+  content: '';
+  display: inline-block;
+  width: 0.2em;
+  height: 0.72em;
+  margin-left: 0.2em;
+  border-radius: 999px;
+  background: var(--ink);
+}
+.form-header p {
+  max-width: 54ch;
+  padding-top: 12px;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--soft);
+  text-wrap: pretty;
+}
+.inputs-wrapper { padding-top: 8px; padding-bottom: 28px; }
+
+/* four groups of four fields, headed by CSS only */
+.form-group { position: relative; margin-top: 20px; }
+.form-group.file-input-wrapper { display: block; }
+.inputs-wrapper > .form-group:nth-child(4n + 1)::before {
+  display: block;
+  margin-top: 34px;
+  margin-bottom: 14px;
+  padding-top: 30px;
+  border-top: 1px solid var(--rule);
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-size: 17px;
+  line-height: 1.2;
+  color: var(--ink);
+}
+.inputs-wrapper > .form-group:nth-child(1)::before { content: 'The brand'; margin-top: 0; padding-top: 0; border-top: 0; }
+.inputs-wrapper > .form-group:nth-child(5)::before { content: 'The message'; }
+.inputs-wrapper > .form-group:nth-child(9)::before { content: 'The footage'; }
+.inputs-wrapper > .form-group:nth-child(13)::before { content: 'The output'; }
+
+/* labels, optional marks and hints */
+form label {
+  padding: 0 0 8px 6px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--indigo);
+}
+.inputs-wrapper > .form-group:nth-child(3) label::after,
+.inputs-wrapper > .form-group:nth-child(12) label::after,
+.inputs-wrapper > .form-group:nth-child(13) label::after,
+.inputs-wrapper > .form-group:nth-child(14) label::after { content: '  optional'; font-weight: 400; color: var(--soft); }
+.inputs-wrapper > .form-group:nth-child(n + 9):nth-child(-n + 14)::after {
+  display: block;
+  padding: 7px 0 0 6px;
+  font-size: 14px;
+  line-height: 1.45;
+  color: var(--soft);
+}
+.inputs-wrapper > .form-group:nth-child(9)::after { content: 'MP4 or MOV, up to 90 MB. Bigger than that? Paste a link below.'; }
+.inputs-wrapper > .form-group:nth-child(10)::after { content: 'An https link, up to 400 MB. Used instead of the file above.'; }
+.inputs-wrapper > .form-group:nth-child(11)::after { content: 'One shot per line, six in all, in order. Times as m:ss or plain seconds.'; }
+.inputs-wrapper > .form-group:nth-child(12)::after { content: 'Replaces the look line written from the clip.'; }
+.inputs-wrapper > .form-group:nth-child(13)::after { content: 'Where the ads link to. https only.'; }
+.inputs-wrapper > .form-group:nth-child(14)::after { content: 'The button text on Meta. Learn More is our guess.'; }
+
+/* controls: capsules with an inset hairline, never a border or a shadow */
+form .form-input {
+  border: 0;
+  border-radius: 999px;
+  height: 48px;
+  padding: 0 22px;
+  background: #FFFFFF;
+  box-shadow: inset 0 0 0 1.5px var(--hair);
+  font-family: var(--font-family);
+  font-size: 15px;
+  color: var(--indigo);
+  caret-color: var(--ink);
+  transition: box-shadow 0.12s ease-out;
+}
+form textarea.form-input {
+  height: auto;
+  min-height: 204px;
+  padding: 16px 22px;
+  border-radius: 22px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.75;
+  resize: vertical;
+  scrollbar-color: var(--ink) transparent;
+}
+::placeholder { color: #6B6585; opacity: 1; }
+form .form-input:focus,
+.select-input:focus-within { outline: none; box-shadow: inset 0 0 0 2px var(--ink); }
+form .form-input:focus-visible,
+form select:focus-visible,
+#submit-btn:focus-visible { outline: 2px solid var(--indigo); outline-offset: 2px; }
+
+input[type='file'] { padding: 7px 10px 7px 7px; font-size: 14px; }
+input[type='file']::file-selector-button {
+  height: 32px;
+  margin-right: 14px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--canvas);
+  font-family: var(--font-family);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+}
+input[type='file']::file-selector-button:hover { background: var(--indigo); }
+
+.select-input {
+  position: relative;
+  border: 0;
+  border-radius: 999px;
+  height: 48px;
+  background: #FFFFFF;
+  box-shadow: inset 0 0 0 1.5px var(--hair);
+}
+.select-input::after {
+  content: '';
+  position: absolute;
+  right: 22px;
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin-top: -7px;
+  border-right: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  border-radius: 1px;
+  transform: rotate(45deg);
+  pointer-events: none;
+}
+form select {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 48px;
+  padding: 0 52px 0 22px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  font-family: var(--font-family);
+  font-size: 15px;
+  color: var(--indigo);
+  cursor: pointer;
+}
+
+/* the one pink: the port on the button */
+#submit-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  width: auto;
+  min-width: 240px;
+  padding: 0 28px 0 22px;
+  border-radius: 999px;
+  font-family: var(--font-family);
+  font-size: 16px;
+  font-weight: 600;
+  transition: background-color 0.12s ease-out;
+}
+#submit-btn::before {
+  content: '';
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--pink);
+}
+#submit-btn:hover { background: var(--indigo); opacity: 1; }
+#submit-btn:disabled { background: #D9D4DF; color: var(--soft); }
+#submit-btn:disabled::before { background: var(--soft); }
+
+/* errors name the problem; they take no room until they show */
+.error-hidden { display: none; padding: 7px 0 0 6px; }
+.error-hidden.error-show { display: block; font-size: 13px; font-weight: 500; }
+.clear-button { background: var(--indigo); }
+
+/* after submit */
+#submitted-form { padding: 40px 48px; }
+#submitted-form .form-header p { padding-top: 10px; }
+
+/* phone */
+@media only screen and (max-width: 560px) {
+  .container { width: calc(100% - 24px); min-height: 0; padding: 12px 0 40px; }
+  form.card { padding: 28px 20px 24px; border-radius: 24px; background-color: #FFFFFF; box-shadow: inset 0 0 0 1.5px var(--rule); margin-bottom: 0; }
+  #submitted-form { padding: 28px 20px; border-radius: 24px; box-shadow: inset 0 0 0 1.5px var(--rule); }
+  .form-header h1 { font-size: 26px; }
+  form textarea.form-input { min-height: 300px; font-size: 12px; padding: 14px 18px; }
+  #submit-btn { width: 100%; }
+}

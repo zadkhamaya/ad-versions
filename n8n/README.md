@@ -15,7 +15,7 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
 
 1. **Brief form** (Form Trigger, Basic Auth). Fields, in order: Brand, Product, Audience, Offer, Key message 1/2/3,
    Required disclaimer (pre-filled with the rulebook's), Source clip (`.mp4`/`.mov`), Source clip link (https, for a
-   file over 90 MB; used instead of the upload when both are given), Beats, Look (optional), Landing URL
+   file over 90 MB; used instead of the upload when both are given), Shot list, Look (optional), Landing URL
    (optional, https; goes to `Link` in manifest.csv), Call to action (default `Learn More`, our guess at Meta's button text),
    **Voice** and **B-roll** (stand-in or real, below).
 2. **Run: ids and brief** → **Run: folder** (`POST /run`, because n8n's file nodes write only into an existing folder) →
@@ -24,7 +24,7 @@ Every node is named for its job; the run is the execution id (`run_id`), and eve
    in the rulebook"; the rulebook's text is the one that goes on the end card (`disclaimer` in the run state) →
    **Source: link given?** → download (https only, redirects are not followed, so the check covers the whole fetch;
    **Source: size cap (400 MB)** refuses a larger file, one constant in that node; uploads are limited to 90 MB, links to 400 MB) or the upload → **Source: write source.mp4**.
-3. **Beats: parse** (Code) turns the Beats text into the service's `beats` (syntax below); **Beats: validate** is
+3. **Beats: parse** (Code) turns the form's Shot list into the service's `beats` (syntax below; the old `S1 0.5-6.0 opener-H1` lines are still read); **Beats: validate** is
    `POST /reframe` on the real clip: it refuses beats outside the clip, suggests windows for `auto` beats and draws the
    sheet. **Reframe: keep** stores the suggestions, the sheet path (`runs/<id>/reframe.jpg`) and the review/split flags.
 4. **Scripts**: one LLM call with structured output (`json_schema`, strict): 2 hooks, a voice-over line
@@ -204,10 +204,25 @@ Two separate dropdowns on the form, both defaulting to the stand-in (a post that
 - The old single "Dry run" checkbox is still understood when a script posts it (`[]` = live b-roll and real voice).
 - Voice cost is not wired yet (0 in `/package`). The GPU cost is the live b-roll's pod time at the pod's rate (stand-in b-roll: 0); report.md's Mode line says which.
 
-## Beats syntax
+## Shot list syntax
 
-One beat per line: `NAME START-END ROLE [POSITION ...]`. Blank lines and `# comments` are ignored; all of S1 to S6
-appear once.
+The form's Shot list is six lines, one shot per line, in order; the n-th line is S<n>. Blank lines and `# comments` are ignored.
+
+```
+0:00.5-0:06    opening, hook 1
+0:06.6-0:09.3  tension
+0:09.6-0:15    routine, follow the action
+0:15.5-0:21.5  opening, hook 2, tall crop 21%, square crop 30%
+0:21.9-0:26.8  calm, tall crop 35%
+0:27.5-0:31.5  close, tall crop 37%, square crop 42%
+```
+
+- **Times** `START-END`: `m:ss` or `m:ss.s` (`0:09.6`, `1:05`) or plain seconds (`9.6-15`); `-`, an en dash or an em dash between; spaces around it are fine.
+- **Role** (first word after the times): `opening, hook 1` or `opening, hook 2` (also `opening hook 1`, or just `hook 1`) become `opener-H1` / `opener-H2`; `tension`, `routine`, `calm`, `close` (`closing` too) keep their names.
+- **Position** (after the role, comma-separated, all optional): `left`, `centre` (or `center`), `right`; `follow the action` becomes `auto`; `tall crop 21%` is the 9:16 window's centre (`x9=0.21`), `square crop 30%` the 1:1 window's (`x1=0.30`). No position means `centre`.
+- A line that cannot be read stops the run with its number and what was expected, for example `Shot 3: no time range like 0:09.6-0:15`; every unreadable line is listed at once. Fewer or more than six lines is refused too.
+
+The translator sits in front of the old syntax and its output is the same `beats` shape, so nothing downstream changes. A line written in the old syntax is still read as it was, also mixed with plain lines (the old line keeps its own S name; a plain line is named by its position among all the lines):
 
 ```
 S1 0.5-6.0 opener-H1 centre
@@ -218,7 +233,7 @@ S5 21.9-26.8 calm x9=0.35
 S6 27.5-31.5 close 0.7 x1=0.42
 ```
 
-`POSITION` is where the 9:16 and 1:1 crop windows sit; it may be left out (= `centre`):
+Old syntax is `NAME START-END ROLE [POSITION ...]` (ROLE a free label). `POSITION` is where the 9:16 and 1:1 crop windows sit; it may be left out (= `centre`):
 
 | Token | Becomes (media service) |
 |---|---|
@@ -255,9 +270,15 @@ S6 27.5-31.5 close 0.7 x1=0.42
 The brief's text goes into the script prompt unescaped. That is fine for one user behind Basic Auth; the hard word list
 and the transcript check are deterministic, so a brief cannot talk its way past them.
 
+## How the form looks
+
+The form keeps its field order (field-0 to field-15, nothing added) and only its page is dressed: title, one-line description, button label ("Make the versions") and the field examples are node parameters; the look is the node's Custom Form Styling option, whose source is `brief-form.css` (the test checks the two are equal). It uses brand kit v2: Canvas ground, one white card, Ultra Blue, capsule controls, Google Fonts for Unbounded, Plus Jakarta Sans and Martian Mono (the browser needs internet for them; without it the fallbacks show). The four group headings (The brand, The message, The footage, The output), the optional marks and the hints under a field are CSS-generated text on fields 1, 5, 9, 13 and so on; Form Trigger 2.2 has no grouping or field-note feature, and a Custom HTML field would take a field number. If a field is added or moved, update those `nth-child` numbers.
+
+A field can be pre-filled from the address, with the field label as the query name: `/form/brief?Brand=Restfield&Offer=First%20visit%20free`, a dropdown by its option text (`&Voice=Real%20(RunPod)`).
+
 ## Posting the form from a script
 
-Fields are `field-0` to `field-15` in the order above (Brand is 0, Offer 3, the file 8, the link 9, Beats 10, Look 11,
+Fields are `field-0` to `field-15` in the order above (Brand is 0, Offer 3, the file 8, the link 9, Shot list 10 (it was Beats), Look 11,
 Landing URL 12, Call to action 13, Voice 14, B-roll 15). Dropdowns take the option text:
 
 ```
