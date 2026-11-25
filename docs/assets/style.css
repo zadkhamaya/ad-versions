@@ -105,6 +105,7 @@ code { padding: 2px 8px; border-radius: 8px; background: var(--code-bg); font: 5
 .split { display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 34px 72px; align-items: start; }
 
 /* the brief: a document card, rows split by 1px dividers */
+figure.source { margin-top: 28px; }
 dl.brief { display: grid; grid-template-columns: max-content minmax(0, 1fr); background: var(--card); box-shadow: var(--edge-card); border-radius: 28px; padding: 10px 26px; font-size: 15px; line-height: 1.45; }
 dl.brief dt, dl.brief dd { padding: 14px 0; border-top: 1px solid var(--divider); }
 dl.brief dt:first-of-type, dl.brief dt:first-of-type + dd { border-top: 0; }
